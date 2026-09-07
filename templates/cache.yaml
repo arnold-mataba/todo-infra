@@ -1,0 +1,56 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  ElastiCache Redis replication group (primary + 1 replica, automatic failover) in the
+  dedicated private-cache subnets, for read-through caching of task lists.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: todo-dev
+  CacheNodeType:
+    Type: String
+    Default: cache.t3.micro
+  EngineVersion:
+    Type: String
+    Default: "7.1"
+  PrivateCacheSubnetIds:
+    Type: String
+    Description: Comma-joined subnet IDs, passed down from root.yaml's NetworkStack output.
+  RedisSecurityGroupId:
+    Type: String
+
+Resources:
+  CacheSubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      Description: Private cache subnets for Redis
+      SubnetIds: !Split [",", !Ref PrivateCacheSubnetIds]
+
+  RedisReplicationGroup:
+    Type: AWS::ElastiCache::ReplicationGroup
+    Properties:
+      ReplicationGroupId: !Sub "${EnvironmentName}-redis"
+      ReplicationGroupDescription: To-Do app read cache
+      Engine: redis
+      EngineVersion: !Ref EngineVersion
+      CacheNodeType: !Ref CacheNodeType
+      Port: 6379
+      NumCacheClusters: 2
+      AutomaticFailoverEnabled: true
+      MultiAZEnabled: true
+      CacheSubnetGroupName: !Ref CacheSubnetGroup
+      SecurityGroupIds:
+        - !Ref RedisSecurityGroupId
+      AtRestEncryptionEnabled: true
+      # No AUTH token / TLS: private-subnet + security-group isolation only, a documented
+      # lab-scope simplification (RDS remains the source of truth; Redis holds only a cache).
+      TransitEncryptionEnabled: false
+      Tags:
+        - Key: Project
+          Value: !Ref EnvironmentName
+
+Outputs:
+  RedisPrimaryEndpointAddress:
+    Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Address
+  RedisPrimaryEndpointPort:
+    Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Port

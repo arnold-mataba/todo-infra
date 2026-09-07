@@ -1,0 +1,115 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  RDS PostgreSQL (Multi-AZ) behind RDS Proxy, in the dedicated private-data subnets. The app
+  only ever talks to the proxy endpoint (enforced by RdsSecurityGroupId ingress in network.yaml).
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: todo-dev
+  DBName:
+    Type: String
+    Default: tododb
+  MasterUsername:
+    Type: String
+    Default: todoadmin
+  DBInstanceClass:
+    Type: String
+    Default: db.t3.micro
+  AllocatedStorage:
+    Type: Number
+    Default: 20
+  PrivateDataSubnetIds:
+    Type: String
+    Description: Comma-joined subnet IDs, passed down from root.yaml's NetworkStack output.
+  RdsSecurityGroupId:
+    Type: String
+  RdsProxySecurityGroupId:
+    Type: String
+
+Resources:
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Private data subnets for RDS + RDS Proxy
+      SubnetIds: !Split [",", !Ref PrivateDataSubnetIds]
+
+  DBInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      Engine: postgres
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: !Ref AllocatedStorage
+      StorageType: gp3
+      StorageEncrypted: true
+      MultiAZ: true
+      DBName: !Ref DBName
+      MasterUsername: !Ref MasterUsername
+      ManageMasterUserPassword: true
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref RdsSecurityGroupId
+      PubliclyAccessible: false
+      BackupRetentionPeriod: 7
+      DeletionProtection: false
+      Tags:
+        - Key: Project
+          Value: !Ref EnvironmentName
+
+  RDSProxyRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${EnvironmentName}-rds-proxy-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: rds.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: read-db-secret
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !GetAtt DBInstance.MasterUserSecret.SecretArn
+
+  DBProxy:
+    Type: AWS::RDS::DBProxy
+    Properties:
+      DBProxyName: !Sub "${EnvironmentName}-rds-proxy"
+      EngineFamily: POSTGRESQL
+      RoleArn: !GetAtt RDSProxyRole.Arn
+      RequireTLS: true
+      VpcSubnetIds: !Split [",", !Ref PrivateDataSubnetIds]
+      VpcSecurityGroupIds:
+        - !Ref RdsProxySecurityGroupId
+      Auth:
+        - AuthScheme: SECRETS
+          IAMAuth: DISABLED
+          SecretArn: !GetAtt DBInstance.MasterUserSecret.SecretArn
+      Tags:
+        - Key: Project
+          Value: !Ref EnvironmentName
+
+  DBProxyTargetGroup:
+    Type: AWS::RDS::DBProxyTargetGroup
+    Properties:
+      DBProxyName: !Ref DBProxy
+      TargetGroupName: default
+      DBInstanceIdentifiers:
+        - !Ref DBInstance
+      ConnectionPoolConfigurationInfo: {}
+
+Outputs:
+  DBInstanceEndpoint:
+    Value: !GetAtt DBInstance.Endpoint.Address
+  DBProxyEndpoint:
+    Value: !GetAtt DBProxy.Endpoint
+  DBSecretArn:
+    Value: !GetAtt DBInstance.MasterUserSecret.SecretArn
+  DBName:
+    Value: !Ref DBName

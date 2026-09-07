@@ -1,0 +1,190 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Root stack for the To-Do app. Nests network/ecr/data/cache/ecs/pipeline as real
+  AWS::CloudFormation::Stack children (this is what makes it a nested-stack architecture,
+  not a set of sibling stacks wired together with Export/Fn::ImportValue): each child receives
+  its inputs as Parameters, sourced from Fn::GetAtt on an earlier sibling's Outputs. Deploy with
+  `aws cloudformation package` (to stage the local child template files in S3) followed by
+  `aws cloudformation deploy` on the packaged output — see README. bootstrap.yaml (OIDC
+  provider/roles + the template-staging bucket) is deployed separately, first, and is not
+  nested here: nothing can package/deploy this root stack before that role exists.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: todo-dev
+  VpcCidr:
+    Type: String
+    Default: 10.0.0.0/16
+  ContainerPort:
+    Type: Number
+    Default: 8080
+  ECRRepositoryName:
+    Type: String
+    Default: todo-app
+  DBName:
+    Type: String
+    Default: tododb
+  MasterUsername:
+    Type: String
+    Default: todoadmin
+  DBInstanceClass:
+    Type: String
+    Default: db.t3.micro
+  AllocatedStorage:
+    Type: Number
+    Default: 20
+  CacheNodeType:
+    Type: String
+    Default: cache.t3.micro
+  RedisEngineVersion:
+    Type: String
+    Default: "7.1"
+  TaskCpu:
+    Type: String
+    Default: "512"
+  TaskMemory:
+    Type: String
+    Default: "1024"
+  PlaceholderImage:
+    Type: String
+    Default: public.ecr.aws/docker/library/httpd:2.4
+  MinTaskCount:
+    Type: Number
+    Default: 1
+  DesiredTaskCount:
+    Type: Number
+    Default: 1
+  MaxTaskCount:
+    Type: Number
+    Default: 4
+  CpuScalingTargetPercent:
+    Type: Number
+    Default: 60
+  ArtifactBucketName:
+    Type: String
+    Description: Must match the value used in bootstrap.yaml.
+  DeployArtifactKey:
+    Type: String
+    Default: deploy-artifacts/artifacts.zip
+
+Resources:
+  NetworkStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ./network.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        VpcCidr: !Ref VpcCidr
+        ContainerPort: !Ref ContainerPort
+      Tags: [{ Key: Project, Value: !Ref EnvironmentName }]
+
+  EcrStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ./ecr.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        ECRRepositoryName: !Ref ECRRepositoryName
+      Tags: [{ Key: Project, Value: !Ref EnvironmentName }]
+
+  DataStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ./data.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        DBName: !Ref DBName
+        MasterUsername: !Ref MasterUsername
+        DBInstanceClass: !Ref DBInstanceClass
+        AllocatedStorage: !Ref AllocatedStorage
+        PrivateDataSubnetIds: !GetAtt NetworkStack.Outputs.PrivateDataSubnetIds
+        RdsSecurityGroupId: !GetAtt NetworkStack.Outputs.RdsSecurityGroupId
+        RdsProxySecurityGroupId: !GetAtt NetworkStack.Outputs.RdsProxySecurityGroupId
+      Tags: [{ Key: Project, Value: !Ref EnvironmentName }]
+
+  CacheStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ./cache.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        CacheNodeType: !Ref CacheNodeType
+        EngineVersion: !Ref RedisEngineVersion
+        PrivateCacheSubnetIds: !GetAtt NetworkStack.Outputs.PrivateCacheSubnetIds
+        RedisSecurityGroupId: !GetAtt NetworkStack.Outputs.RedisSecurityGroupId
+      Tags: [{ Key: Project, Value: !Ref EnvironmentName }]
+
+  EcsStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ./ecs.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        ContainerPort: !Ref ContainerPort
+        TaskCpu: !Ref TaskCpu
+        TaskMemory: !Ref TaskMemory
+        PlaceholderImage: !Ref PlaceholderImage
+        MinTaskCount: !Ref MinTaskCount
+        DesiredTaskCount: !Ref DesiredTaskCount
+        MaxTaskCount: !Ref MaxTaskCount
+        CpuScalingTargetPercent: !Ref CpuScalingTargetPercent
+        VpcId: !GetAtt NetworkStack.Outputs.VpcId
+        PublicSubnetIds: !GetAtt NetworkStack.Outputs.PublicSubnetIds
+        PrivateEcsSubnetIds: !GetAtt NetworkStack.Outputs.PrivateEcsSubnetIds
+        AlbSecurityGroupId: !GetAtt NetworkStack.Outputs.AlbSecurityGroupId
+        EcsSecurityGroupId: !GetAtt NetworkStack.Outputs.EcsSecurityGroupId
+        DbSecretArn: !GetAtt DataStack.Outputs.DBSecretArn
+        DbProxyEndpoint: !GetAtt DataStack.Outputs.DBProxyEndpoint
+        DbName: !GetAtt DataStack.Outputs.DBName
+        RedisPrimaryEndpointAddress: !GetAtt CacheStack.Outputs.RedisPrimaryEndpointAddress
+        RedisPrimaryEndpointPort: !GetAtt CacheStack.Outputs.RedisPrimaryEndpointPort
+      Tags: [{ Key: Project, Value: !Ref EnvironmentName }]
+
+  PipelineStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ./pipeline.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        ArtifactBucketName: !Ref ArtifactBucketName
+        DeployArtifactKey: !Ref DeployArtifactKey
+        EcrRepositoryName: !Ref ECRRepositoryName
+        ServiceName: !GetAtt EcsStack.Outputs.ServiceName
+        ClusterName: !GetAtt EcsStack.Outputs.ClusterName
+        ListenerArn: !GetAtt EcsStack.Outputs.ListenerArn
+        TargetGroupBlueName: !GetAtt EcsStack.Outputs.TargetGroupBlueName
+        TargetGroupGreenName: !GetAtt EcsStack.Outputs.TargetGroupGreenName
+      Tags: [{ Key: Project, Value: !Ref EnvironmentName }]
+
+Outputs:
+  AlbDnsName:
+    Value: !GetAtt EcsStack.Outputs.AlbDnsName
+  EcrRepositoryUri:
+    Value: !GetAtt EcrStack.Outputs.RepositoryUri
+  ClusterName:
+    Value: !GetAtt EcsStack.Outputs.ClusterName
+  ServiceName:
+    Value: !GetAtt EcsStack.Outputs.ServiceName
+  TaskExecutionRoleArn:
+    Value: !GetAtt EcsStack.Outputs.TaskExecutionRoleArn
+  TaskRoleArn:
+    Value: !GetAtt EcsStack.Outputs.TaskRoleArn
+  TaskDefinitionFamily:
+    Value: !GetAtt EcsStack.Outputs.TaskDefinitionFamily
+  AppLogGroupName:
+    Value: !GetAtt EcsStack.Outputs.AppLogGroupName
+  DjangoSecretKeyArn:
+    Value: !GetAtt EcsStack.Outputs.DjangoSecretKeyArn
+  DbProxyEndpoint:
+    Value: !GetAtt DataStack.Outputs.DBProxyEndpoint
+  DbName:
+    Value: !GetAtt DataStack.Outputs.DBName
+  DbSecretArn:
+    Value: !GetAtt DataStack.Outputs.DBSecretArn
+  RedisPrimaryEndpointAddress:
+    Value: !GetAtt CacheStack.Outputs.RedisPrimaryEndpointAddress
+  RedisPrimaryEndpointPort:
+    Value: !GetAtt CacheStack.Outputs.RedisPrimaryEndpointPort
+  ArtifactBucketName:
+    Value: !Ref ArtifactBucketName

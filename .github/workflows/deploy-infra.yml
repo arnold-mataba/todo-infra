@@ -1,0 +1,78 @@
+name: Deploy Infrastructure
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "templates/**"
+      - ".github/workflows/deploy-infra.yml"
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write # required for OIDC
+  contents: read
+
+env:
+  ENVIRONMENT_NAME: todo-dev
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.INFRA_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      # Re-deploying bootstrap.yaml on every run keeps the OIDC provider/roles/template bucket
+      # in sync with the repo, but the very first deploy of this stack must be done manually
+      # (local/console credentials) — see README "One-time bootstrap".
+      - name: Deploy bootstrap.yaml
+        run: |
+          aws cloudformation deploy \
+            --stack-name ${{ env.ENVIRONMENT_NAME }}-bootstrap \
+            --template-file templates/bootstrap.yaml \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              EnvironmentName=${{ env.ENVIRONMENT_NAME }} \
+              GitHubOwnerId=${{ secrets.GITHUB_OWNER_ID }} \
+              InfraRepositoryId=${{ secrets.INFRA_REPOSITORY_ID }} \
+              AppRepositoryId=${{ secrets.APP_REPOSITORY_ID }} \
+              ECRRepositoryName=${{ vars.ECR_REPOSITORY_NAME }} \
+              ArtifactBucketName=${{ secrets.ARTIFACT_BUCKET_NAME }} \
+              TemplateBucketName=${{ secrets.TEMPLATE_BUCKET_NAME }}
+
+      # Real nested stacks: root.yaml's child templates are local files referenced by relative
+      # TemplateURL, so they have to be uploaded to S3 (and root.yaml rewritten to point at
+      # those S3 URLs) before `deploy` can create/update the AWS::CloudFormation::Stack
+      # resources that reference them.
+      - name: Package nested templates
+        run: |
+          aws cloudformation package \
+            --template-file templates/root.yaml \
+            --s3-bucket ${{ secrets.TEMPLATE_BUCKET_NAME }} \
+            --s3-prefix cfn-templates \
+            --output-template-file packaged-root.yaml
+
+      - name: Deploy root.yaml (network, ecr, data, cache, ecs, pipeline as nested stacks)
+        run: |
+          aws cloudformation deploy \
+            --stack-name ${{ env.ENVIRONMENT_NAME }}-root \
+            --template-file packaged-root.yaml \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              EnvironmentName=${{ env.ENVIRONMENT_NAME }} \
+              ECRRepositoryName=${{ vars.ECR_REPOSITORY_NAME }} \
+              ArtifactBucketName=${{ secrets.ARTIFACT_BUCKET_NAME }}
+
+      - name: Print ALB endpoint
+        run: |
+          aws cloudformation describe-stacks \
+            --stack-name ${{ env.ENVIRONMENT_NAME }}-root \
+            --query "Stacks[0].Outputs[?OutputKey=='AlbDnsName'].OutputValue" \
+            --output text

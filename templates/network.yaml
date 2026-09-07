@@ -1,0 +1,364 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Multi-AZ VPC for the To-Do app: public subnets for the ALB, and 3 dedicated private subnet
+  tiers (ECS, RDS/RDS Proxy, ElastiCache) across 2 AZs. No NAT Gateway — private egress is via
+  VPC endpoints only (ECR api/dkr, CloudWatch Logs, Secrets Manager, S3).
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: todo-dev
+  VpcCidr:
+    Type: String
+    Default: 10.0.0.0/16
+  ContainerPort:
+    Type: Number
+    Default: 8080
+    Description: Port the Django/gunicorn app listens on inside the container.
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-vpc"
+        - Key: Project
+          Value: !Ref EnvironmentName
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-igw"
+  IGWAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # ---------------- Subnets: public / private-ecs / private-data / private-cache x 2 AZ ----------------
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: 10.0.0.0/24
+      MapPublicIpOnLaunch: true
+      Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-public-a" }]
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: true
+      Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-public-b" }]
+
+  PrivateEcsSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: 10.0.10.0/24
+      Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-private-ecs-a" }]
+  PrivateEcsSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: 10.0.11.0/24
+      Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-private-ecs-b" }]
+
+  PrivateDataSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: 10.0.20.0/24
+      Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-private-data-a" }]
+  PrivateDataSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: 10.0.21.0/24
+      Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-private-data-b" }]
+
+  PrivateCacheSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: 10.0.30.0/24
+      Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-private-cache-a" }]
+  PrivateCacheSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: 10.0.31.0/24
+      Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-private-cache-b" }]
+
+  # ---------------- Routing ----------------
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-public-rt" }]
+  PublicDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: IGWAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  PublicSubnetARouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { SubnetId: !Ref PublicSubnetA, RouteTableId: !Ref PublicRouteTable }
+  PublicSubnetBRouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { SubnetId: !Ref PublicSubnetB, RouteTableId: !Ref PublicRouteTable }
+
+  # Single shared private route table: no NAT, no per-AZ route differences — all private
+  # egress is via VPC endpoints (interface endpoints need no route; the S3 gateway endpoint
+  # below adds its own prefix-list route to this table).
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-private-rt" }]
+  PrivateEcsSubnetARouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { SubnetId: !Ref PrivateEcsSubnetA, RouteTableId: !Ref PrivateRouteTable }
+  PrivateEcsSubnetBRouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { SubnetId: !Ref PrivateEcsSubnetB, RouteTableId: !Ref PrivateRouteTable }
+  PrivateDataSubnetARouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { SubnetId: !Ref PrivateDataSubnetA, RouteTableId: !Ref PrivateRouteTable }
+  PrivateDataSubnetBRouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { SubnetId: !Ref PrivateDataSubnetB, RouteTableId: !Ref PrivateRouteTable }
+  PrivateCacheSubnetARouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { SubnetId: !Ref PrivateCacheSubnetA, RouteTableId: !Ref PrivateRouteTable }
+  PrivateCacheSubnetBRouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { SubnetId: !Ref PrivateCacheSubnetB, RouteTableId: !Ref PrivateRouteTable }
+
+  # ---------------- Security groups (base groups, restricted egress via explicit rules below) ----------------
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ALB - public ingress on 80/443, egress restricted to the ECS SG only
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0 }
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0 }
+      SecurityGroupEgress:
+        - { IpProtocol: "-1", CidrIp: 127.0.0.1/32, Description: "placeholder - real egress added as explicit SecurityGroupEgress resources" }
+      Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-alb-sg" }]
+
+  ECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ECS tasks - ingress from ALB only, egress restricted to proxy/redis/endpoints
+      VpcId: !Ref VPC
+      SecurityGroupEgress:
+        - { IpProtocol: "-1", CidrIp: 127.0.0.1/32, Description: "placeholder - real egress added as explicit SecurityGroupEgress resources" }
+      Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-ecs-sg" }]
+
+  RDSProxySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: RDS Proxy - ingress from ECS only, egress restricted to RDS only
+      VpcId: !Ref VPC
+      SecurityGroupEgress:
+        - { IpProtocol: "-1", CidrIp: 127.0.0.1/32, Description: "placeholder - real egress added as explicit SecurityGroupEgress resources" }
+      Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-rds-proxy-sg" }]
+
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: RDS - ingress from RDS Proxy only (app never connects to RDS directly)
+      VpcId: !Ref VPC
+      Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-rds-sg" }]
+
+  RedisSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ElastiCache Redis - ingress from ECS only
+      VpcId: !Ref VPC
+      Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-redis-sg" }]
+
+  VPCEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: >
+        Interface VPC endpoints - ingress 443 from the whole VPC CIDR (not one resource's SG)
+        so the endpoints remain reusable shared infra for any future workload in the VPC.
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: !Ref VpcCidr }
+      Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-vpce-sg" }]
+
+  # ---------------- Explicit cross-SG rules (avoids inline circular references) ----------------
+  AlbEgressToEcs:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ALBSecurityGroup
+      IpProtocol: tcp
+      FromPort: !Ref ContainerPort
+      ToPort: !Ref ContainerPort
+      DestinationSecurityGroupId: !Ref ECSSecurityGroup
+  EcsIngressFromAlb:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ECSSecurityGroup
+      IpProtocol: tcp
+      FromPort: !Ref ContainerPort
+      ToPort: !Ref ContainerPort
+      SourceSecurityGroupId: !Ref ALBSecurityGroup
+
+  EcsEgressToRdsProxy:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ECSSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      DestinationSecurityGroupId: !Ref RDSProxySecurityGroup
+  RdsProxyIngressFromEcs:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref RDSProxySecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref ECSSecurityGroup
+
+  RdsProxyEgressToRds:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref RDSProxySecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      DestinationSecurityGroupId: !Ref RDSSecurityGroup
+  RdsIngressFromProxy:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref RDSSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref RDSProxySecurityGroup
+
+  EcsEgressToRedis:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ECSSecurityGroup
+      IpProtocol: tcp
+      FromPort: 6379
+      ToPort: 6379
+      DestinationSecurityGroupId: !Ref RedisSecurityGroup
+  RedisIngressFromEcs:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref RedisSecurityGroup
+      IpProtocol: tcp
+      FromPort: 6379
+      ToPort: 6379
+      SourceSecurityGroupId: !Ref ECSSecurityGroup
+
+  EcsEgressToEndpoints:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ECSSecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      DestinationSecurityGroupId: !Ref VPCEndpointSecurityGroup
+
+  # ---------------- VPC Endpoints (replace NAT Gateway entirely) ----------------
+  S3GatewayEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
+      VpcEndpointType: Gateway
+      RouteTableIds: [!Ref PrivateRouteTable]
+
+  EcrApiEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.ecr.api"
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref PrivateEcsSubnetA, !Ref PrivateEcsSubnetB]
+      SecurityGroupIds: [!Ref VPCEndpointSecurityGroup]
+
+  EcrDkrEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.ecr.dkr"
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref PrivateEcsSubnetA, !Ref PrivateEcsSubnetB]
+      SecurityGroupIds: [!Ref VPCEndpointSecurityGroup]
+
+  LogsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.logs"
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref PrivateEcsSubnetA, !Ref PrivateEcsSubnetB]
+      SecurityGroupIds: [!Ref VPCEndpointSecurityGroup]
+
+  SecretsManagerEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.secretsmanager"
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref PrivateEcsSubnetA, !Ref PrivateEcsSubnetB]
+      SecurityGroupIds: [!Ref VPCEndpointSecurityGroup]
+
+Outputs:
+  # Plain Outputs, read by root.yaml via Fn::GetAtt NetworkStack.Outputs.<Key> — this is a real
+  # nested stack (root.yaml owns it via AWS::CloudFormation::Stack), not a sibling stack, so
+  # there's no need to publish these into the account-wide Export namespace.
+  VpcId:
+    Value: !Ref VPC
+  VpcCidr:
+    Value: !Ref VpcCidr
+  PublicSubnetIds:
+    Value: !Join [",", [!Ref PublicSubnetA, !Ref PublicSubnetB]]
+  PrivateEcsSubnetIds:
+    Value: !Join [",", [!Ref PrivateEcsSubnetA, !Ref PrivateEcsSubnetB]]
+  PrivateDataSubnetIds:
+    Value: !Join [",", [!Ref PrivateDataSubnetA, !Ref PrivateDataSubnetB]]
+  PrivateCacheSubnetIds:
+    Value: !Join [",", [!Ref PrivateCacheSubnetA, !Ref PrivateCacheSubnetB]]
+  AlbSecurityGroupId:
+    Value: !Ref ALBSecurityGroup
+  EcsSecurityGroupId:
+    Value: !Ref ECSSecurityGroup
+  RdsProxySecurityGroupId:
+    Value: !Ref RDSProxySecurityGroup
+  RdsSecurityGroupId:
+    Value: !Ref RDSSecurityGroup
+  RedisSecurityGroupId:
+    Value: !Ref RedisSecurityGroup
+  ContainerPort:
+    Value: !Ref ContainerPort
