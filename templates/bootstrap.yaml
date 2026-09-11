@@ -59,8 +59,6 @@ Resources:
       ClientIdList:
         - sts.amazonaws.com
       ThumbprintList:
-        # GitHub's OIDC provider is publicly trusted; AWS validates the TLS chain itself, this
-        # is a required-but-effectively-unused legacy field for GitHub's provider.
         - 6938fd4d98bab03faadb97b34396831e3780aea1
 
   TemplateBucket:
@@ -117,8 +115,6 @@ Resources:
                   - cloudformation:ListStackResources
                   - cloudformation:ValidateTemplate
                 Resource:
-                  # Root stack + every nested child stack CloudFormation creates under it share
-                  # this naming pattern (nested stack logical names get appended automatically).
                   - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${EnvironmentName}-*/*"
               - Sid: IamOnTodoRolesOnly
                 Effect: Allow
@@ -150,9 +146,6 @@ Resources:
                   - !GetAtt TemplateBucket.Arn
                   - !Sub "${TemplateBucket.Arn}/*"
               - Sid: ProvisioningServices
-                # Broad service actions are inherent to a role whose job is to provision
-                # infrastructure via CloudFormation; the meaningful scoping is on IAM (above)
-                # and CloudFormation (above), which gate what this role can actually create.
                 Effect: Allow
                 Action:
                   - ec2:*
@@ -194,7 +187,6 @@ Resources:
             Statement:
               - Sid: EcrAuth
                 Effect: Allow
-                # Account-level action with no resource-level scoping in the ECR API.
                 Action: ecr:GetAuthorizationToken
                 Resource: "*"
               - Sid: EcrPushToTodoAppRepo

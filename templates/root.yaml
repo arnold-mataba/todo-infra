@@ -1,13 +1,13 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
   Root stack for the To-Do app. Nests network/ecr/data/cache/ecs/pipeline as real
-  AWS::CloudFormation::Stack children (this is what makes it a nested-stack architecture,
-  not a set of sibling stacks wired together with Export/Fn::ImportValue): each child receives
-  its inputs as Parameters, sourced from Fn::GetAtt on an earlier sibling's Outputs. Deploy with
-  `aws cloudformation package` (to stage the local child template files in S3) followed by
-  `aws cloudformation deploy` on the packaged output — see README. bootstrap.yaml (OIDC
-  provider/roles + the template-staging bucket) is deployed separately, first, and is not
-  nested here: nothing can package/deploy this root stack before that role exists.
+  AWS::CloudFormation::Stack children, wired via Fn::GetAtt on sibling Outputs, not Export/
+  Fn::ImportValue. Deploy with `aws cloudformation package` then `deploy` — see README.
+  bootstrap.yaml (OIDC roles + template bucket) deploys separately, first.
+
+  EcsStack/PipelineStack only get created once InitialImageUri is set to a real pushed image
+  (HasInitialImage condition) — leave it empty on the first deploy (foundation only, no
+  placeholder image anywhere), then redeploy once a real image exists. See README.
 
 Parameters:
   EnvironmentName:
@@ -46,9 +46,12 @@ Parameters:
   TaskMemory:
     Type: String
     Default: "1024"
-  PlaceholderImage:
+  InitialImageUri:
     Type: String
-    Default: public.ecr.aws/docker/library/httpd:2.4
+    Default: ""
+    Description: >
+      Real ECR image URI (repo:tag). Leave empty on the first deploy (foundation only, no
+      ECS/pipeline); set once a real image has been pushed to create EcsStack/PipelineStack.
   MinTaskCount:
     Type: Number
     Default: 1
@@ -67,6 +70,9 @@ Parameters:
   DeployArtifactKey:
     Type: String
     Default: deploy-artifacts/artifacts.zip
+
+Conditions:
+  HasInitialImage: !Not [!Equals [!Ref InitialImageUri, ""]]
 
 Resources:
   NetworkStack:
@@ -117,6 +123,7 @@ Resources:
 
   EcsStack:
     Type: AWS::CloudFormation::Stack
+    Condition: HasInitialImage
     Properties:
       TemplateURL: ./ecs.yaml
       Parameters:
@@ -124,7 +131,7 @@ Resources:
         ContainerPort: !Ref ContainerPort
         TaskCpu: !Ref TaskCpu
         TaskMemory: !Ref TaskMemory
-        PlaceholderImage: !Ref PlaceholderImage
+        ImageUri: !Ref InitialImageUri
         MinTaskCount: !Ref MinTaskCount
         DesiredTaskCount: !Ref DesiredTaskCount
         MaxTaskCount: !Ref MaxTaskCount
@@ -135,14 +142,11 @@ Resources:
         AlbSecurityGroupId: !GetAtt NetworkStack.Outputs.AlbSecurityGroupId
         EcsSecurityGroupId: !GetAtt NetworkStack.Outputs.EcsSecurityGroupId
         DbSecretArn: !GetAtt DataStack.Outputs.DBSecretArn
-        DbProxyEndpoint: !GetAtt DataStack.Outputs.DBProxyEndpoint
-        DbName: !GetAtt DataStack.Outputs.DBName
-        RedisPrimaryEndpointAddress: !GetAtt CacheStack.Outputs.RedisPrimaryEndpointAddress
-        RedisPrimaryEndpointPort: !GetAtt CacheStack.Outputs.RedisPrimaryEndpointPort
       Tags: [{ Key: Project, Value: !Ref EnvironmentName }]
 
   PipelineStack:
     Type: AWS::CloudFormation::Stack
+    Condition: HasInitialImage
     Properties:
       TemplateURL: ./pipeline.yaml
       Parameters:
@@ -159,23 +163,23 @@ Resources:
 
 Outputs:
   AlbDnsName:
-    Value: !GetAtt EcsStack.Outputs.AlbDnsName
+    Value: !If [HasInitialImage, !GetAtt EcsStack.Outputs.AlbDnsName, "not created yet - see InitialImageUri"]
   EcrRepositoryUri:
     Value: !GetAtt EcrStack.Outputs.RepositoryUri
   ClusterName:
-    Value: !GetAtt EcsStack.Outputs.ClusterName
+    Value: !If [HasInitialImage, !GetAtt EcsStack.Outputs.ClusterName, "not created yet - see InitialImageUri"]
   ServiceName:
-    Value: !GetAtt EcsStack.Outputs.ServiceName
+    Value: !If [HasInitialImage, !GetAtt EcsStack.Outputs.ServiceName, "not created yet - see InitialImageUri"]
   TaskExecutionRoleArn:
-    Value: !GetAtt EcsStack.Outputs.TaskExecutionRoleArn
+    Value: !If [HasInitialImage, !GetAtt EcsStack.Outputs.TaskExecutionRoleArn, "not created yet - see InitialImageUri"]
   TaskRoleArn:
-    Value: !GetAtt EcsStack.Outputs.TaskRoleArn
+    Value: !If [HasInitialImage, !GetAtt EcsStack.Outputs.TaskRoleArn, "not created yet - see InitialImageUri"]
   TaskDefinitionFamily:
-    Value: !GetAtt EcsStack.Outputs.TaskDefinitionFamily
+    Value: !If [HasInitialImage, !GetAtt EcsStack.Outputs.TaskDefinitionFamily, "not created yet - see InitialImageUri"]
   AppLogGroupName:
-    Value: !GetAtt EcsStack.Outputs.AppLogGroupName
+    Value: !If [HasInitialImage, !GetAtt EcsStack.Outputs.AppLogGroupName, "not created yet - see InitialImageUri"]
   DjangoSecretKeyArn:
-    Value: !GetAtt EcsStack.Outputs.DjangoSecretKeyArn
+    Value: !If [HasInitialImage, !GetAtt EcsStack.Outputs.DjangoSecretKeyArn, "not created yet - see InitialImageUri"]
   DbProxyEndpoint:
     Value: !GetAtt DataStack.Outputs.DBProxyEndpoint
   DbName:

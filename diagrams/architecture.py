@@ -1,15 +1,3 @@
-"""
-Diagram-as-code source for the To-Do app architecture diagram.
-Regenerate with:
-    python3 -m venv .venv && .venv/bin/pip install diagrams
-    .venv/bin/python3 architecture.py
-Requires Graphviz (`dot`) on PATH.
-
-Follows the standard AWS reference-architecture nesting convention:
-AWS Cloud -> Region -> VPC -> Availability Zone -> Subnet, using the official AWS
-Architecture Icons shipped with the `diagrams` package (mingrammer/diagrams).
-"""
-
 from diagrams import Cluster, Diagram, Edge
 from diagrams.aws.compute import ECR, ECS, Fargate
 from diagrams.aws.database import ElasticacheForRedis, RDSPostgresqlInstance, RDSInstance

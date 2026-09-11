@@ -9,11 +9,8 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  id-token: write # required for OIDC
+  id-token: write
   contents: read
-
-env:
-  ENVIRONMENT_NAME: todo-dev
 
 jobs:
   deploy:
@@ -27,18 +24,15 @@ jobs:
           role-to-assume: ${{ secrets.INFRA_DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      # Re-deploying bootstrap.yaml on every run keeps the OIDC provider/roles/template bucket
-      # in sync with the repo, but the very first deploy of this stack must be done manually
-      # (local/console credentials) — see README "One-time bootstrap".
       - name: Deploy bootstrap.yaml
         run: |
           aws cloudformation deploy \
-            --stack-name ${{ env.ENVIRONMENT_NAME }}-bootstrap \
+            --stack-name ${{ vars.ENVIRONMENT_NAME }}-bootstrap \
             --template-file templates/bootstrap.yaml \
             --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset \
             --parameter-overrides \
-              EnvironmentName=${{ env.ENVIRONMENT_NAME }} \
+              EnvironmentName=${{ vars.ENVIRONMENT_NAME }} \
               GitHubOwnerId=${{ secrets.GITHUB_OWNER_ID }} \
               InfraRepositoryId=${{ secrets.INFRA_REPOSITORY_ID }} \
               AppRepositoryId=${{ secrets.APP_REPOSITORY_ID }} \
@@ -46,10 +40,6 @@ jobs:
               ArtifactBucketName=${{ secrets.ARTIFACT_BUCKET_NAME }} \
               TemplateBucketName=${{ secrets.TEMPLATE_BUCKET_NAME }}
 
-      # Real nested stacks: root.yaml's child templates are local files referenced by relative
-      # TemplateURL, so they have to be uploaded to S3 (and root.yaml rewritten to point at
-      # those S3 URLs) before `deploy` can create/update the AWS::CloudFormation::Stack
-      # resources that reference them.
       - name: Package nested templates
         run: |
           aws cloudformation package \
@@ -58,21 +48,37 @@ jobs:
             --s3-prefix cfn-templates \
             --output-template-file packaged-root.yaml
 
-      - name: Deploy root.yaml (network, ecr, data, cache, ecs, pipeline as nested stacks)
+      - name: Look up latest ECR image tag
+        id: latest-image
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          TAG=$(aws ecr describe-images \
+            --repository-name ${{ vars.ECR_REPOSITORY_NAME }} \
+            --query 'sort_by(imageDetails,&imagePushedAt)[-1].imageTags[0]' \
+            --output text 2>/dev/null || true)
+          if [ -z "$TAG" ] || [ "$TAG" = "None" ]; then
+            echo "No image pushed yet — deploying foundation only (network/ecr/data/cache)."
+            echo "image_uri=" >> "$GITHUB_OUTPUT"
+          else
+            echo "image_uri=${ACCOUNT_ID}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/${{ vars.ECR_REPOSITORY_NAME }}:${TAG}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy root.yaml (network, ecr, data, cache, and ecs+pipeline once an image exists)
         run: |
           aws cloudformation deploy \
-            --stack-name ${{ env.ENVIRONMENT_NAME }}-root \
+            --stack-name ${{ vars.ENVIRONMENT_NAME }}-root \
             --template-file packaged-root.yaml \
-            --capabilities CAPABILITY_NAMED_IAM \
+            --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
             --no-fail-on-empty-changeset \
             --parameter-overrides \
-              EnvironmentName=${{ env.ENVIRONMENT_NAME }} \
+              EnvironmentName=${{ vars.ENVIRONMENT_NAME }} \
               ECRRepositoryName=${{ vars.ECR_REPOSITORY_NAME }} \
-              ArtifactBucketName=${{ secrets.ARTIFACT_BUCKET_NAME }}
+              ArtifactBucketName=${{ secrets.ARTIFACT_BUCKET_NAME }} \
+              InitialImageUri=${{ steps.latest-image.outputs.image_uri }}
 
       - name: Print ALB endpoint
         run: |
           aws cloudformation describe-stacks \
-            --stack-name ${{ env.ENVIRONMENT_NAME }}-root \
+            --stack-name ${{ vars.ENVIRONMENT_NAME }}-root \
             --query "Stacks[0].Outputs[?OutputKey=='AlbDnsName'].OutputValue" \
             --output text

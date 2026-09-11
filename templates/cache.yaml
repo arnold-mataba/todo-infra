@@ -42,12 +42,24 @@ Resources:
       SecurityGroupIds:
         - !Ref RedisSecurityGroupId
       AtRestEncryptionEnabled: true
-      # No AUTH token / TLS: private-subnet + security-group isolation only, a documented
-      # lab-scope simplification (RDS remains the source of truth; Redis holds only a cache).
       TransitEncryptionEnabled: false
       Tags:
         - Key: Project
           Value: !Ref EnvironmentName
+
+  RedisHostParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${EnvironmentName}/redis-host"
+      Type: String
+      Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Address
+
+  RedisPortParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${EnvironmentName}/redis-port"
+      Type: String
+      Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Port
 
 Outputs:
   RedisPrimaryEndpointAddress:

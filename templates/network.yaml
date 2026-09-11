@@ -41,7 +41,6 @@ Resources:
       VpcId: !Ref VPC
       InternetGatewayId: !Ref InternetGateway
 
-  # ---------------- Subnets: public / private-ecs / private-data / private-cache x 2 AZ ----------------
   PublicSubnetA:
     Type: AWS::EC2::Subnet
     Properties:
@@ -104,7 +103,6 @@ Resources:
       CidrBlock: 10.0.31.0/24
       Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-private-cache-b" }]
 
-  # ---------------- Routing ----------------
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -124,9 +122,6 @@ Resources:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties: { SubnetId: !Ref PublicSubnetB, RouteTableId: !Ref PublicRouteTable }
 
-  # Single shared private route table: no NAT, no per-AZ route differences — all private
-  # egress is via VPC endpoints (interface endpoints need no route; the S3 gateway endpoint
-  # below adds its own prefix-list route to this table).
   PrivateRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -151,7 +146,6 @@ Resources:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties: { SubnetId: !Ref PrivateCacheSubnetB, RouteTableId: !Ref PrivateRouteTable }
 
-  # ---------------- Security groups (base groups, restricted egress via explicit rules below) ----------------
   ALBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -207,7 +201,6 @@ Resources:
         - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: !Ref VpcCidr }
       Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-vpce-sg" }]
 
-  # ---------------- Explicit cross-SG rules (avoids inline circular references) ----------------
   AlbEgressToEcs:
     Type: AWS::EC2::SecurityGroupEgress
     Properties:
@@ -285,7 +278,6 @@ Resources:
       ToPort: 443
       DestinationSecurityGroupId: !Ref VPCEndpointSecurityGroup
 
-  # ---------------- VPC Endpoints (replace NAT Gateway entirely) ----------------
   S3GatewayEndpoint:
     Type: AWS::EC2::VPCEndpoint
     Properties:
@@ -335,9 +327,6 @@ Resources:
       SecurityGroupIds: [!Ref VPCEndpointSecurityGroup]
 
 Outputs:
-  # Plain Outputs, read by root.yaml via Fn::GetAtt NetworkStack.Outputs.<Key> — this is a real
-  # nested stack (root.yaml owns it via AWS::CloudFormation::Stack), not a sibling stack, so
-  # there's no need to publish these into the account-wide Export namespace.
   VpcId:
     Value: !Ref VPC
   VpcCidr:

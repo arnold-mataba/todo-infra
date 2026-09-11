@@ -1,4 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::LanguageExtensions
 Description: ECR repository for the To-Do app container image.
 
 Parameters:
@@ -21,10 +22,17 @@ Resources:
       EncryptionConfiguration:
         EncryptionType: AES256
       LifecyclePolicy:
-        LifecyclePolicyText: >
-          {"rules":[{"rulePriority":1,"description":"Keep last 15 images",
-          "selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":15},
-          "action":{"type":"expire"}}]}
+        LifecyclePolicyText:
+          Fn::ToJsonString:
+            rules:
+              - rulePriority: 1
+                description: Keep last 5 images
+                selection:
+                  tagStatus: any
+                  countType: imageCountMoreThan
+                  countNumber: 5
+                action:
+                  type: expire
       Tags:
         - Key: Project
           Value: !Ref EnvironmentName

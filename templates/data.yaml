@@ -104,6 +104,27 @@ Resources:
         - !Ref DBInstance
       ConnectionPoolConfigurationInfo: {}
 
+  DbProxyEndpointParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${EnvironmentName}/db-proxy-endpoint"
+      Type: String
+      Value: !GetAtt DBProxy.Endpoint
+
+  DbPortParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${EnvironmentName}/db-port"
+      Type: String
+      Value: "5432"
+
+  DbNameParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${EnvironmentName}/db-name"
+      Type: String
+      Value: !Ref DBName
+
 Outputs:
   DBInstanceEndpoint:
     Value: !GetAtt DBInstance.Endpoint.Address
