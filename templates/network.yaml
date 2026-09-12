@@ -2,7 +2,7 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: >
   Multi-AZ VPC for the To-Do app: public subnets for the ALB, and 3 dedicated private subnet
   tiers (ECS, RDS/RDS Proxy, ElastiCache) across 2 AZs. No NAT Gateway — private egress is via
-  VPC endpoints only (ECR api/dkr, CloudWatch Logs, Secrets Manager, S3).
+  VPC endpoints only (ECR api/dkr, CloudWatch Logs, Secrets Manager, SSM, S3).
 
 Parameters:
   EnvironmentName:
@@ -15,6 +15,10 @@ Parameters:
     Type: Number
     Default: 8080
     Description: Port the Django/gunicorn app listens on inside the container.
+  S3PrefixListId:
+    Type: String
+    Default: pl-63a5400a
+    Description: Managed prefix list ID for com.amazonaws.us-east-1.s3 (region-specific; this default is the us-east-1 value). Needed so ECSSecurityGroup can egress to the S3 gateway endpoint, since gateway endpoints have no ENI/SG of their own to reference.
 
 Resources:
   VPC:
@@ -193,9 +197,7 @@ Resources:
   VPCEndpointSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: >
-        Interface VPC endpoints - ingress 443 from the whole VPC CIDR (not one resource's SG)
-        so the endpoints remain reusable shared infra for any future workload in the VPC.
+      GroupDescription: Interface VPC endpoints - ingress 443 from the whole VPC CIDR, reusable shared infra for any future workload in the VPC
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: !Ref VpcCidr }
@@ -278,6 +280,15 @@ Resources:
       ToPort: 443
       DestinationSecurityGroupId: !Ref VPCEndpointSecurityGroup
 
+  EcsEgressToS3Gateway:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ECSSecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      DestinationPrefixListId: !Ref S3PrefixListId
+
   S3GatewayEndpoint:
     Type: AWS::EC2::VPCEndpoint
     Properties:
@@ -321,6 +332,16 @@ Resources:
     Properties:
       VpcId: !Ref VPC
       ServiceName: !Sub "com.amazonaws.${AWS::Region}.secretsmanager"
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref PrivateEcsSubnetA, !Ref PrivateEcsSubnetB]
+      SecurityGroupIds: [!Ref VPCEndpointSecurityGroup]
+
+  SsmEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.ssm"
       VpcEndpointType: Interface
       PrivateDnsEnabled: true
       SubnetIds: [!Ref PrivateEcsSubnetA, !Ref PrivateEcsSubnetB]

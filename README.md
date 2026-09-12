@@ -202,3 +202,32 @@ Known nested-stack blast-radius tradeoff: because everything but `bootstrap` liv
 root stack, a failed update to any single child (say, a bad `ecs.yaml` change) rolls back the
 whole root stack update, not just that child. This is inherent to real nested stacks — it's the
 tradeoff for "one deploy creates/updates everything together," which is what was asked for here.
+
+## Real bugs found and fixed on the first actual deploy to this account
+
+Five things only surfaced once this was deployed for real, not caught by `validate-template`:
+
+1. **This AWS account already had a GitHub OIDC provider** (from a prior lab — IAM allows only
+   one `token.actions.githubusercontent.com` provider per account). `bootstrap.yaml` no longer
+   creates `AWS::IAM::OIDCProvider`; it references the existing provider's deterministic ARN
+   (`arn:aws:iam::<account>:oidc-provider/token.actions.githubusercontent.com`) directly.
+2. **IAM now requires an OIDC trust policy to include a `sub` or `job_workflow_ref` condition
+   that isn't wildcarded to everything**, even when `repository_id`/`repository_owner_id`
+   conditions are already present and more durable. Added a `GitHubOwner` parameter and a
+   `StringLike` condition on `token.actions.githubusercontent.com:sub` (`repo:<owner>/<repo>:*`)
+   alongside the existing ID-based conditions in all three roles.
+3. **`AWS::EC2::SecurityGroup`'s `GroupDescription` rejects characters outside
+   `a-zA-Z0-9. _-:/()#,@[]+=&;{}!$*`** — an apostrophe in one description broke deployment. It
+   also silently rejects the trailing newline a YAML folded scalar (`>`) appends, even when
+   every visible character is otherwise valid — descriptions must be plain single-line scalars.
+4. **Missing SSM VPC endpoint.** Moving DB/Redis config to SSM Parameter Store (see above) added
+   a real network dependency the VPC endpoint list didn't have yet — ECS tasks couldn't reach
+   SSM to resolve those `secrets` entries and failed to launch. Added `SsmEndpoint`
+   (`com.amazonaws.<region>.ssm`, interface) alongside the other four.
+5. **Missing security-group egress path to the S3 gateway endpoint.** Gateway endpoints (unlike
+   interface endpoints) have no ENI/security-group of their own — routing traffic to one via the
+   route table isn't enough if the security group's egress rules don't also permit it. ECR image
+   pulls fetch layer blobs through S3, so without this, pulls timed out even though DNS/routing
+   looked correct. Added an `EcsEgressToS3Gateway` rule using `DestinationPrefixListId` (the
+   managed prefix list for the S3 endpoint), which is exactly the mechanism this rule type exists
+   for — CIDR/security-group destinations can't express "wherever this gateway endpoint routes."

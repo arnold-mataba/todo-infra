@@ -19,6 +19,14 @@ Parameters:
       Numeric GitHub owner (org/user) ID. Stable across org/repo renames, unlike the
       "owner/repo" string. Obtain with: gh api users/<owner> --jq .id (or orgs/<owner>).
 
+  GitHubOwner:
+    Type: String
+    Description: >
+      GitHub org/user login (e.g. "arnold-mataba"). IAM now requires every OIDC trust policy to
+      include a `sub`/`job_workflow_ref` condition that isn't wildcarded to everything, even
+      when repository_id/repository_owner_id are already present — this is used only to build
+      that required `sub` condition alongside the ID-based ones.
+
   InfraRepositoryId:
     Type: String
     Description: >
@@ -58,15 +66,6 @@ Parameters:
       templates in (must be globally unique) — e.g. todo-app-cfn-templates-123456789012.
 
 Resources:
-  GitHubOIDCProvider:
-    Type: AWS::IAM::OIDCProvider
-    Properties:
-      Url: https://token.actions.githubusercontent.com
-      ClientIdList:
-        - sts.amazonaws.com
-      ThumbprintList:
-        - 6938fd4d98bab03faadb97b34396831e3780aea1
-
   TemplateBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -91,13 +90,15 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Federated: !Ref GitHubOIDCProvider
+              Federated: !Sub "arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com"
             Action: sts:AssumeRoleWithWebIdentity
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
                 token.actions.githubusercontent.com:repository_id: !Ref InfraRepositoryId
                 token.actions.githubusercontent.com:repository_owner_id: !Ref GitHubOwnerId
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOwner}/todo-infra:*"
       Policies:
         - PolicyName: cloudformation-deploy
           PolicyDocument:
@@ -179,13 +180,15 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Federated: !Ref GitHubOIDCProvider
+              Federated: !Sub "arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com"
             Action: sts:AssumeRoleWithWebIdentity
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
                 token.actions.githubusercontent.com:repository_id: !Ref AppRepositoryId
                 token.actions.githubusercontent.com:repository_owner_id: !Ref GitHubOwnerId
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOwner}/todo-app:*"
       Policies:
         - PolicyName: ecr-push-and-artifact-upload
           PolicyDocument:
@@ -225,13 +228,15 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Federated: !Ref GitHubOIDCProvider
+              Federated: !Sub "arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com"
             Action: sts:AssumeRoleWithWebIdentity
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
                 token.actions.githubusercontent.com:repository_id: !Ref EcrRepositoryId
                 token.actions.githubusercontent.com:repository_owner_id: !Ref GitHubOwnerId
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOwner}/todo-ecr:*"
       Policies:
         - PolicyName: deploy-ecr-stack
           PolicyDocument:
