@@ -156,7 +156,17 @@ come from `todo-bootstrap`'s stack outputs)
 
 **Variables** (plain, non-identifying config — also referenced as `vars.*`, never hardcoded as a
 literal in the workflow): `ENVIRONMENT_NAME` (`todo-dev`), `AWS_REGION` (e.g. `us-east-1`),
-`ECR_REPOSITORY_NAME` (`todo-app`)
+`ECR_REPOSITORY_NAME` (`todo-app`), `AUTO_DEPLOY_ENABLED` (`true`/`false`)
+
+`AUTO_DEPLOY_ENABLED` gates whether a plain `push` actually deploys anything — `workflow_dispatch`
+(manual trigger) always runs regardless. Found the hard way: after intentionally tearing down
+`todo-dev-root` to stop billing overnight, an unrelated push to `templates/**` (just moving
+`bootstrap.yaml` out to `todo-bootstrap`) silently re-triggered `deploy-infra.yml`, which happily
+started recreating the entire stack — the workflow had no concept of "this was torn down on
+purpose, stay down." Caught it a few seconds in (only `NetworkStack` had started) and deleted it
+again, but the workflow shouldn't have been able to do that unprompted at all. Set this to
+`false` whenever intentionally spun down; only flip it to `true` while you actually want every
+push to auto-deploy.
 
 ## After deploying: hand outputs to `todo-app`
 
