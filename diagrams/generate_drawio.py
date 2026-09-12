@@ -173,7 +173,9 @@ left_col_id = nid("leftcol")
 
 def build_az(is_a):
     letter = "A" if is_a else "B"
-    pub = subnet_spec(f"Public Subnet {letter}  (10.0.{0 if is_a else 1}.0/24)", "public", [])
+    alb_id = nid(f"alb{letter}")
+    pub_icons = [(alb_id, f"ALB node (AZ {letter})\none logical Application Load\nBalancer, a node in each AZ\nListener :80 -> TG blue/green", "application_load_balancer", NETWORK)]
+    pub = subnet_spec(f"Public Subnet {letter}  (10.0.{0 if is_a else 1}.0/24)", "public", pub_icons)
 
     ecs_task_id = nid(f"ecs{letter}")
     vpce_id = nid(f"vpce{letter}")
@@ -217,7 +219,7 @@ def build_az(is_a):
     finalize_subnet(data, ar2x + r2pos[0][0], ar2y + r2pos[0][1], az_id)
     finalize_subnet(cache, ar2x + r2pos[1][0], ar2y + r2pos[1][1], az_id)
 
-    ids = {"ecs": ecs_task_id, "vpce": vpce_id, "data": proxy_id or rds_id, "rds": rds_id, "cache": redis_id}
+    ids = {"alb": alb_id, "ecs": ecs_task_id, "vpce": vpce_id, "data": proxy_id or rds_id, "rds": rds_id, "cache": redis_id}
     return az_id, aw, ah, ids
 
 az_a_id, az_a_w, az_a_h, az_a_ids = build_az(True)
@@ -226,7 +228,6 @@ az_b_id, az_b_w, az_b_h, az_b_ids = build_az(False)
 
 vpc_inner = Stack("v", None, pad_top=55, pad_right=45, pad_bottom=45, pad_left=45, gap=45)
 nx, ny = vpc_inner.place(500, ICON_H + SLOT_LABEL_H)
-ax, ay = vpc_inner.place(az_row_w, ICON_H + SLOT_LABEL_H)
 rx, ry = vpc_inner.place(az_row_w, az_row_h)
 vpc_w, vpc_h = vpc_inner.size()
 vpc_id = nid("vpc")
@@ -234,15 +235,6 @@ vpc_id = nid("vpc")
 add_cell(nid("svcnote"), NOTE_STYLE, nx, ny, 500, ICON_H + SLOT_LABEL_H, vpc_id,
          "ECS Service: todo-dev-todo-app — Auto Scaling: min 1 / desired 1 / max 4, target tracking "
          "60% avg CPU — DeploymentController: CODE_DEPLOY — Task size: 0.5 vCPU / 1 GB (Fargate)")
-
-# One ALB, centered above both AZs — it's a single resource with a load-balancer node (ENI) in
-# each AZ's public subnet, not two separate load balancers. Placed here (not inside either
-# public subnet) so one icon can connect cleanly down into both AZs without implying it's
-# specific to one of them.
-alb_id = nid("alb")
-alb_x = ax + (az_row_w - ICON_W) / 2
-add_cell(alb_id, icon_style("application_load_balancer", NETWORK), alb_x, ay, ICON_W, ICON_H, vpc_id,
-         "Application Load Balancer\n(one resource, a node in each AZ)\nListener :80 -> TG blue/green\nHealth check: /health/")
 
 add_cell(az_a_id, group_style("mxgraph.aws4.group_availability_zone", "#147EBA", dashed=1),
          rx + az_row_pos[0][0], ry + az_row_pos[0][1], az_a_w, az_a_h, vpc_id, "Availability Zone A")
@@ -277,6 +269,16 @@ internet_id = nid("internet")
 add_cell(users_id, icon_style("users", GENERAL), 60, 60 + cloud_h / 2 - 130, ICON_W, ICON_H, root_id, "Users")
 add_cell(internet_id, icon_style("internet_alt1", NETWORK), 60, 60 + cloud_h / 2 - 10, ICON_W, ICON_H, root_id, "Internet")
 
+# Internet Gateway: a single VPC-attached resource, drawn straddling the VPC's top boundary
+# (half in, half out) — the standard AWS reference-architecture placement, since it's the one
+# resource that is neither strictly "outside" nor "inside" the VPC the way other icons are.
+vpc_abs_x = CLOUD_X + 60 + region_x + region_row_pos[1][0]
+vpc_abs_y = 60 + 60 + region_y + region_row_pos[1][1]
+igw_id = nid("igw")
+add_cell(igw_id, icon_style("internet_gateway", NETWORK),
+         vpc_abs_x + vpc_w / 2 - ICON_W / 2, vpc_abs_y - ICON_H / 2, ICON_W, ICON_H, root_id,
+         "Internet Gateway")
+
 # Standard AWS reference-architecture connector: solid, neutral gray, orthogonal, block arrow.
 # Matches the style used in AWS's own reference-architecture diagrams and drawio's AWS4 samples.
 EDGE = "edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;fontColor=#545B64;endArrow=block;elbow=vertical;strokeWidth=1.5;strokeColor=#545B64;"
@@ -292,9 +294,11 @@ def edge_dashed(src, tgt, label=""):
     add_cell(nid("edge"), EDGE_DASHED, 0, 0, 0, 0, root_id, label, vertex=0, edge=1, source=src, target=tgt)
 
 edge(users_id, internet_id)
-edge(internet_id, alb_id)
-edge(alb_id, az_a_ids["ecs"], ":8080", "exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;")
-edge(alb_id, az_b_ids["ecs"], ":8080", "exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;")
+edge(internet_id, igw_id)
+edge(igw_id, az_a_ids["alb"])
+edge(igw_id, az_b_ids["alb"])
+edge(az_a_ids["alb"], az_a_ids["ecs"], ":8080", "exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;")
+edge(az_b_ids["alb"], az_b_ids["ecs"], ":8080", "exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;")
 
 edge(az_a_ids["ecs"], az_a_ids["data"], "writes :5432")
 edge(az_b_ids["ecs"], az_a_ids["data"], "writes :5432")
@@ -318,7 +322,8 @@ edge(ecr_icon_id, eb_icon_id, "image PUSH event")
 edge(eb_icon_id, cp_icon_id, "StartPipelineExecution")
 edge(artifactbucket_id, cp_icon_id, "S3 source\n(taskdef.json + appspec.yaml)")
 edge(cp_icon_id, cd_icon_id)
-edge(cd_icon_id, alb_id, "blue/green traffic shift", f"strokeColor={COMPUTE};strokeWidth=2;")
+edge(cd_icon_id, az_a_ids["alb"], "blue/green traffic shift\n(shared listener, both AZs)", f"strokeColor={COMPUTE};strokeWidth=2;")
+edge(cd_icon_id, az_b_ids["alb"], "", f"strokeColor={COMPUTE};strokeWidth=2;")
 
 mxfile = ET.Element("mxfile", host="app.diagrams.net")
 diagram = ET.SubElement(mxfile, "diagram", id="todo-app-arch", name="Network Architecture")
