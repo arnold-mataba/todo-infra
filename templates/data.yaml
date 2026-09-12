@@ -2,6 +2,10 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: >
   RDS PostgreSQL (Multi-AZ) behind RDS Proxy, in the dedicated private-data subnets. The app
   only ever talks to the proxy endpoint (enforced by RdsSecurityGroupId ingress in network.yaml).
+  Master credentials live in a self-managed DbCredentialsSecret (deterministic name) rather than
+  RDS's own ManageMasterUserPassword feature, so the app's task definition can reference the
+  secret by a static, hardcodable partial ARN instead of an unpredictable rds!db-<uuid> name —
+  the tradeoff is no automatic password rotation (a documented lab-scope simplification).
 
 Parameters:
   EnvironmentName:
@@ -28,6 +32,20 @@ Parameters:
     Type: String
 
 Resources:
+  DbCredentialsSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${EnvironmentName}-db-credentials"
+      Description: RDS master credentials, deterministic name so the app's task definition can reference it as a static ARN.
+      GenerateSecretString:
+        SecretStringTemplate: !Sub '{"username":"${MasterUsername}"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludePunctuation: true
+      Tags:
+        - Key: Project
+          Value: !Ref EnvironmentName
+
   DBSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
     Properties:
@@ -38,6 +56,7 @@ Resources:
 
   DBInstance:
     Type: AWS::RDS::DBInstance
+    DependsOn: DbCredentialsSecret
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
@@ -49,7 +68,7 @@ Resources:
       MultiAZ: true
       DBName: !Ref DBName
       MasterUsername: !Ref MasterUsername
-      ManageMasterUserPassword: true
+      MasterUserPassword: !Sub "{{resolve:secretsmanager:${EnvironmentName}-db-credentials:SecretString:password}}"
       DBSubnetGroupName: !Ref DBSubnetGroup
       VPCSecurityGroups:
         - !Ref RdsSecurityGroupId
@@ -78,7 +97,7 @@ Resources:
             Statement:
               - Effect: Allow
                 Action: secretsmanager:GetSecretValue
-                Resource: !GetAtt DBInstance.MasterUserSecret.SecretArn
+                Resource: !Ref DbCredentialsSecret
 
   DBProxy:
     Type: AWS::RDS::DBProxy
@@ -95,7 +114,7 @@ Resources:
       Auth:
         - AuthScheme: SECRETS
           IAMAuth: DISABLED
-          SecretArn: !GetAtt DBInstance.MasterUserSecret.SecretArn
+          SecretArn: !Ref DbCredentialsSecret
       Tags:
         - Key: Project
           Value: !Ref EnvironmentName
@@ -135,6 +154,6 @@ Outputs:
   DBProxyEndpoint:
     Value: !GetAtt DBProxy.Endpoint
   DBSecretArn:
-    Value: !GetAtt DBInstance.MasterUserSecret.SecretArn
+    Value: !Ref DbCredentialsSecret
   DBName:
     Value: !Ref DBName

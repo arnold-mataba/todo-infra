@@ -1,11 +1,12 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
   ECS Fargate cluster/service behind a public ALB, with blue/green target groups for
-  CodeDeploy and CPU-based auto scaling (1-4 tasks). Nested under root.yaml, created only once
-  root.yaml's HasInitialImage condition is true (see root.yaml) — VPC/subnet/SG/secret values
-  arrive as Parameters via Fn::GetAtt on sibling nested stacks; plain (non-secret) config like
-  the DB proxy endpoint and Redis host is read directly from SSM Parameter Store by name
-  (/<EnvironmentName>/...), not passed in as a Parameter here at all — see data.yaml/cache.yaml.
+  CodeDeploy and CPU-based auto scaling (1-4 tasks). Nested under root.yaml — VPC/subnet/SG/
+  secret values arrive as Parameters via Fn::GetAtt on sibling nested stacks; plain (non-secret)
+  config like the DB proxy endpoint and Redis host is read directly from SSM Parameter Store by
+  name (/<EnvironmentName>/...), not passed in as a Parameter here at all — see
+  data.yaml/cache.yaml. The image is always ${ECRRepositoryName}:latest — a mutable tag pushed
+  to on every build, so the URI is a fixed, derivable string, never looked up or passed in.
 
 Parameters:
   EnvironmentName:
@@ -20,11 +21,9 @@ Parameters:
   TaskMemory:
     Type: String
     Default: "1024"
-  ImageUri:
+  ECRRepositoryName:
     Type: String
-    Description: >
-      Real ECR image URI (repo:tag) to run. Required, no default/placeholder — root.yaml only
-      creates this stack once a real image already exists (see root.yaml's HasInitialImage).
+    Default: todo-app
   MinTaskCount:
     Type: Number
     Default: 1
@@ -140,7 +139,7 @@ Resources:
       TaskRoleArn: !GetAtt TaskRole.Arn
       ContainerDefinitions:
         - Name: todo-app
-          Image: !Ref ImageUri
+          Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ECRRepositoryName}:latest"
           PortMappings:
             - ContainerPort: !Ref ContainerPort
               Protocol: tcp

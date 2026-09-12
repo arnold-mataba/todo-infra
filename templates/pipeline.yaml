@@ -1,12 +1,14 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  Deploy pipeline: an ECR image push fires an EventBridge rule that starts CodePipeline, which
-  pulls the deploy artifact (appspec.yaml + a fully-rendered taskdef.json) from S3 (native "ECR"
-  source watches one fixed tag, incompatible with immutable git-SHA tags), runs Django
-  migrations once as a one-off ECS task (Migrate stage - blocks Deploy on non-zero exit, so
-  migrations never race across the multiple tasks a blue/green deploy starts concurrently), then
-  hands off to CodeDeploy for the ECS blue/green traffic shift. See README for the full design
-  rationale on each stage.
+  Deploy pipeline: an ECR image push (mutable :latest tag) fires an EventBridge rule that starts
+  CodePipeline, which pulls the deploy artifact (appspec.yaml + the real, static, checked-in
+  taskdef.json — no rendering) from S3, runs Django migrations once as a one-off ECS task
+  (Migrate stage - blocks Deploy on non-zero exit, so migrations never race across the multiple
+  tasks a blue/green deploy starts concurrently), then hands off to CodeDeploy for the ECS
+  blue/green traffic shift. S3 (not CodePipeline's native ECR source action) still carries the
+  artifact since it needs to deliver appspec.yaml + taskdef.json alongside the trigger; a native
+  ECR source action would still need a separate mechanism for those two files. See README for
+  the full design rationale on each stage.
 
 Parameters:
   EnvironmentName:

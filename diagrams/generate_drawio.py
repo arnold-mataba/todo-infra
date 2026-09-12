@@ -145,19 +145,19 @@ g_icon(boot, "Template Bucket (S3)\ncfn-templates staging\nfor `cfn package`", "
 
 ecr_g = group_spec("ECR Repository  (own stack, in todo-bootstrap repo)", "mxgraph.aws4.group_generic", COMPUTE,
                     pad_top=45, pad_right=25, pad_bottom=25, pad_left=25, gap=30)
-ecr_icon_id = g_icon(ecr_g, "todo-app\nImageTagMutability: IMMUTABLE\nScanOnPush: true", "elastic_container_registry", COMPUTE)
+ecr_icon_id = g_icon(ecr_g, "todo-app\nImageTagMutability: MUTABLE\nScanOnPush: true", "elastic_container_registry", COMPUTE)
 g_note(ecr_g, "Lifecycle policy: expire, keep\nlast 5 images (imageCountMoreThan)", h=70)
 
 pipe = group_spec("CI/CD Pipeline  (pipeline.yaml)", "mxgraph.aws4.group_generic", INTEGRATION,
                    pad_top=45, pad_right=25, pad_bottom=25, pad_left=25, gap=30)
 eb_icon_id = g_icon(pipe, "EventBridge Rule\nsource=aws.ecr, action=PUSH\nrepository-name=todo-app", "eventbridge", INTEGRATION)
 artifactbucket_id = g_icon(pipe, "Artifact Bucket (S3)\ndeploy-artifacts/artifacts.zip\nversioned, private", "simple_storage_service_bucket", STORAGE)
-cp_icon_id = g_icon(pipe, "CodePipeline\nSource: S3 only (no ECR\nsource action — immutable tags)", "codepipeline", DEVTOOLS)
+cp_icon_id = g_icon(pipe, "CodePipeline\nSource: S3 (taskdef.json +\nappspec.yaml delivered together)", "codepipeline", DEVTOOLS)
 cd_icon_id = g_icon(pipe, "CodeDeploy\nApp + DeploymentGroup\nBLUE_GREEN, ECSAllAtOnce", "codedeploy", DEVTOOLS)
 
 cfg = group_spec("Configuration & Secrets  (regional services)", "mxgraph.aws4.group_generic", SECURITY,
                   pad_top=45, pad_right=25, pad_bottom=25, pad_left=25, gap=30)
-dbsecret_id = g_icon(cfg, "DB Credentials\nRDS-managed secret\n(auto-rotated name)", "secrets_manager", SECURITY)
+dbsecret_id = g_icon(cfg, "DB Credentials\ntodo-dev-db-credentials\n(self-managed, deterministic name)", "secrets_manager", SECURITY)
 djsecret_id = g_icon(cfg, "Django SECRET_KEY\ntodo-dev-django-secret-key\n(generated, 50 chars)", "secrets_manager", SECURITY)
 ssm_id = g_icon(cfg, "SSM Parameters (free tier)\n/todo-dev/db-proxy-endpoint\n/todo-dev/db-port, db-name\n/todo-dev/redis-host, redis-port", "systems_manager", MGMT)
 

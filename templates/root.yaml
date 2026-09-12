@@ -8,9 +8,11 @@ Description: >
   here at all — so this root stack only ever references the ECR repository by name
   (ECRRepositoryName), never creates it.
 
-  EcsStack/PipelineStack only get created once InitialImageUri is set to a real pushed image
-  (HasInitialImage condition) — leave it empty on the first deploy (foundation only, no
-  placeholder image anywhere), then redeploy once a real image exists. See README.
+  EcsStack/PipelineStack are always created — the image is always ${ECRRepositoryName}:latest,
+  a fixed, mutable tag every todo-app build pushes to, so there is no placeholder-vs-real-image
+  distinction to gate on. Prerequisite: push a real image to that tag at least once (see
+  README) before the very first deploy of this stack, since ECS can't launch a task from a
+  tag that doesn't exist yet.
 
 Parameters:
   EnvironmentName:
@@ -49,12 +51,6 @@ Parameters:
   TaskMemory:
     Type: String
     Default: "1024"
-  InitialImageUri:
-    Type: String
-    Default: ""
-    Description: >
-      Real ECR image URI (repo:tag). Leave empty on the first deploy (foundation only, no
-      ECS/pipeline); set once a real image has been pushed to create EcsStack/PipelineStack.
   MinTaskCount:
     Type: Number
     Default: 1
@@ -73,12 +69,6 @@ Parameters:
   DeployArtifactKey:
     Type: String
     Default: deploy-artifacts/artifacts.zip
-
-Conditions:
-  HasInitialImage: !Not
-    - !Equals
-      - !Ref InitialImageUri
-      - ""
 
 Resources:
   NetworkStack:
@@ -126,7 +116,6 @@ Resources:
 
   EcsStack:
     Type: AWS::CloudFormation::Stack
-    Condition: HasInitialImage
     Properties:
       TemplateURL: ./ecs.yaml
       Parameters:
@@ -134,7 +123,7 @@ Resources:
         ContainerPort: !Ref ContainerPort
         TaskCpu: !Ref TaskCpu
         TaskMemory: !Ref TaskMemory
-        ImageUri: !Ref InitialImageUri
+        ECRRepositoryName: !Ref ECRRepositoryName
         MinTaskCount: !Ref MinTaskCount
         DesiredTaskCount: !Ref DesiredTaskCount
         MaxTaskCount: !Ref MaxTaskCount
@@ -151,7 +140,6 @@ Resources:
 
   PipelineStack:
     Type: AWS::CloudFormation::Stack
-    Condition: HasInitialImage
     Properties:
       TemplateURL: ./pipeline.yaml
       Parameters:
@@ -174,45 +162,21 @@ Resources:
 
 Outputs:
   AlbDnsName:
-    Value: !If
-      - HasInitialImage
-      - !GetAtt EcsStack.Outputs.AlbDnsName
-      - "not created yet - see InitialImageUri"
+    Value: !GetAtt EcsStack.Outputs.AlbDnsName
   ClusterName:
-    Value: !If
-      - HasInitialImage
-      - !GetAtt EcsStack.Outputs.ClusterName
-      - "not created yet - see InitialImageUri"
+    Value: !GetAtt EcsStack.Outputs.ClusterName
   ServiceName:
-    Value: !If
-      - HasInitialImage
-      - !GetAtt EcsStack.Outputs.ServiceName
-      - "not created yet - see InitialImageUri"
+    Value: !GetAtt EcsStack.Outputs.ServiceName
   TaskExecutionRoleArn:
-    Value: !If
-      - HasInitialImage
-      - !GetAtt EcsStack.Outputs.TaskExecutionRoleArn
-      - "not created yet - see InitialImageUri"
+    Value: !GetAtt EcsStack.Outputs.TaskExecutionRoleArn
   TaskRoleArn:
-    Value: !If
-      - HasInitialImage
-      - !GetAtt EcsStack.Outputs.TaskRoleArn
-      - "not created yet - see InitialImageUri"
+    Value: !GetAtt EcsStack.Outputs.TaskRoleArn
   TaskDefinitionFamily:
-    Value: !If
-      - HasInitialImage
-      - !GetAtt EcsStack.Outputs.TaskDefinitionFamily
-      - "not created yet - see InitialImageUri"
+    Value: !GetAtt EcsStack.Outputs.TaskDefinitionFamily
   AppLogGroupName:
-    Value: !If
-      - HasInitialImage
-      - !GetAtt EcsStack.Outputs.AppLogGroupName
-      - "not created yet - see InitialImageUri"
+    Value: !GetAtt EcsStack.Outputs.AppLogGroupName
   DjangoSecretKeyArn:
-    Value: !If
-      - HasInitialImage
-      - !GetAtt EcsStack.Outputs.DjangoSecretKeyArn
-      - "not created yet - see InitialImageUri"
+    Value: !GetAtt EcsStack.Outputs.DjangoSecretKeyArn
   DbProxyEndpoint:
     Value: !GetAtt DataStack.Outputs.DBProxyEndpoint
   DbName:

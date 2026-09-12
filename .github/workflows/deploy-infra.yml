@@ -33,15 +33,7 @@ jobs:
             --s3-prefix cfn-templates \
             --output-template-file packaged-root.yaml
 
-      - name: Determine InitialImageUri
-        id: latest-image
-        env:
-          ENVIRONMENT_NAME: ${{ vars.ENVIRONMENT_NAME }}
-          ECR_REPOSITORY_NAME: ${{ vars.ECR_REPOSITORY_NAME }}
-          AWS_REGION: ${{ vars.AWS_REGION }}
-        run: ./scripts/determine-image-uri.sh
-
-      - name: Deploy root.yaml (network, data, cache, and ecs+pipeline once an image exists)
+      - name: Deploy root.yaml (network, data, cache, ecs, pipeline)
         run: |
           aws cloudformation deploy \
             --stack-name ${{ vars.ENVIRONMENT_NAME }}-root \
@@ -51,8 +43,7 @@ jobs:
             --parameter-overrides \
               EnvironmentName=${{ vars.ENVIRONMENT_NAME }} \
               ECRRepositoryName=${{ vars.ECR_REPOSITORY_NAME }} \
-              ArtifactBucketName=${{ secrets.ARTIFACT_BUCKET_NAME }} \
-              InitialImageUri=${{ steps.latest-image.outputs.image_uri }}
+              ArtifactBucketName=${{ secrets.ARTIFACT_BUCKET_NAME }}
 
       - name: Print ALB endpoint
         run: |

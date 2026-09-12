@@ -71,39 +71,26 @@ aws cloudformation deploy \
 `TemplateURL: ./network.yaml`-style references into real S3 URLs; `deploy` then creates/updates
 the root stack and, transitively, every nested child.
 
-## No placeholder image, ever — EcsStack/PipelineStack are conditional
+## No placeholder image, ever — the image is always `:latest`, a fixed mutable tag
 
-`root.yaml` takes an `InitialImageUri` parameter (default `""`) and a `HasInitialImage`
-condition. `EcsStack` and `PipelineStack` only exist when that condition is true. So:
-
-1. **First deploy**: leave `InitialImageUri` empty. Only `NetworkStack`/`DataStack`/
-   `CacheStack` get created — no ECS, no ALB, no pipeline, and critically, no fake placeholder
-   image anywhere. (The ECR repository itself needs to exist first too — see
-   `todo-bootstrap`'s README; its deploy is fully independent of this one.)
-2. **One-time manual bootstrap push** (see below): build and push the *real* app image once,
-   by hand, so ECR actually has a tag to reference.
-3. **Redeploy `root.yaml`** with `InitialImageUri` set to that real image URI. This creates
-   `EcsStack`/`PipelineStack` referencing a real image from the start — no busybox/httpd
-   placeholder, no `DesiredCount: 0` + manual bump, no bootstrap dance to design around.
-
-`deploy-infra.yml` automates step 3: on every run it looks up the newest pushed ECR tag and
-passes it as `InitialImageUri` automatically (resolving to empty until step 2 has happened, at
-which point the very next infra deploy creates the compute stacks on its own).
-
-### One-time bootstrap push
-
-After step 1 (foundation-only deploy) has created the ECR repo, push a real image once with
-your own local credentials — this becomes the ECS service's first task definition:
+`EcsStack`/`PipelineStack` are always created — there's no conditional gating and no
+`InitialImageUri` parameter. `ecs.yaml` builds the image URI itself
+(`${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ECRRepositoryName}:latest`), since
+`todo-app`'s workflow always pushes to that same mutable tag — the URI is a fixed, derivable
+string, never looked up or passed in from anywhere. The only precondition is that ECR must
+already have *an* image under `:latest` before the very first deploy of this stack, since ECS
+can't launch a task from a tag that doesn't exist yet:
 
 ```bash
 aws ecr get-login-password --region <region> | docker login --username AWS --password-stdin <account-id>.dkr.ecr.<region>.amazonaws.com
 cd ../todo-app
-docker build -t <account-id>.dkr.ecr.<region>.amazonaws.com/todo-app:bootstrap .
-docker push <account-id>.dkr.ecr.<region>.amazonaws.com/todo-app:bootstrap
+docker build -t <account-id>.dkr.ecr.<region>.amazonaws.com/todo-app:latest .
+docker push <account-id>.dkr.ecr.<region>.amazonaws.com/todo-app:latest
 ```
 
-Then re-run (or `workflow_dispatch`) the infra deploy workflow — it'll find that tag and create
-`EcsStack`/`PipelineStack`. From then on, every push to `todo-app` goes through the real
+After that one-time push, every future deploy of `root.yaml` (including the very first one)
+just works — no two-phase dance, no script to look up "the newest tag," nothing to keep in sync.
+From then on, every push to `todo-app` overwrites `:latest` and goes through the real
 EventBridge → CodePipeline → CodeDeploy blue/green path.
 
 ## Design decisions worth knowing before you touch this
@@ -118,23 +105,29 @@ EventBridge → CodePipeline → CodeDeploy blue/green path.
 - **No NAT Gateway.** Private subnets have no internet route at all. All egress the ECS tasks
   need (ECR image pulls, CloudWatch Logs, Secrets Manager, SSM, S3 for image layers) goes
   through VPC interface/gateway endpoints instead.
-- **CodePipeline's Source stage is S3-only, not ECR.** The ECR repo uses immutable git-SHA tags
-  (no floating `:latest`), which CodePipeline's native ECR source action can't watch (it tracks
-  one fixed tag). Instead, `todo-app`'s workflow generates the real task definition (image URI
-  baked in) directly and uploads it with `appspec.yaml` to S3 on every build. EventBridge —
-  watching the actual ECR push event — is what starts the pipeline.
-- **Only real secrets live in Secrets Manager.** DB credentials (RDS-managed) and the Django
-  secret key are genuine secrets with unpredictable names/ARNs, so they're in Secrets Manager and
-  flow through CloudFormation `Fn::GetAtt`/Outputs. Everything else the app needs — DB proxy
+- **ECR uses a mutable `:latest` tag, not immutable git-SHA tags.** Every build overwrites the
+  same tag, so the image URI is a fixed, derivable string — `ecs.yaml` computes it itself, no
+  lookup, no parameter, no script. See `todo-app/README.md` for the tradeoff (no per-build image
+  history; rollback means redeploying an older commit, not repointing a tag).
+- **CodePipeline's Source stage is still S3, not ECR, even with a floating tag now.**
+  CodePipeline's native ECR source action could watch `:latest` today, but it would still need a
+  separate mechanism to deliver `appspec.yaml`/`taskdef.json` alongside the trigger (a GitHub
+  source action needs a manually-authorized CodeStar Connection — a console-only step). S3 +
+  EventBridge delivers both the trigger and the two files together, with no extra manual setup.
+- **Both app secrets have deterministic names, not RDS/CFN-assigned random ones.** The Django
+  key was always named `${EnvironmentName}-django-secret-key`; the DB credentials secret
+  (`data.yaml`'s `DbCredentialsSecret`) is now self-managed the same way, replacing RDS's
+  `ManageMasterUserPassword` feature specifically so its name — and therefore a static, partial
+  ARN — is knowable ahead of time. Tradeoff: no automatic password rotation (RDS's managed
+  passwords rotate themselves; a self-managed secret needs its own rotation setup, not configured
+  here — a documented lab-scope simplification). Everything else the app needs — DB proxy
   endpoint, DB port/name, Redis host/port — is plain config, not a secret: it lives in SSM
-  Parameter Store (free for Standard-tier parameters, vs. Secrets Manager's per-secret cost)
-  under a deterministic `/<EnvironmentName>/...` path, and the ECS task definition references it
-  by that predictable name — no need to pipe it through nested-stack Parameters or GitHub
-  secrets at all (see `data.yaml`/`cache.yaml`/`ecs.yaml`, and `todo-app/README.md`).
-- **No checked-in task-definition template.** `todo-app`'s workflow builds the real, complete
-  task definition JSON with `jq` on every run (image URI + the same naming-convention values
-  `ecs.yaml` uses) rather than `sed`/`envsubst`-substituting placeholder tokens into a committed
-  `taskdef.json`. One fewer place a deploy can silently go stale.
+  Parameter Store under a deterministic `/<EnvironmentName>/...` path.
+- **`todo-app/deploy/taskdef.json` is a real, complete, checked-in file — not a template.**
+  Every value in it is now static: the image is always `:latest`, both secrets have
+  deterministic names (referenced by partial ARN, no random suffix needed), and account/region/
+  role names are fixed for this single-environment lab. The workflow doesn't render or generate
+  anything — it just zips this file with `appspec.yaml` and uploads it.
 - Full HA: RDS Multi-AZ standby + Redis replica. No AUTH token / TLS on Redis (private-subnet +
   security-group isolation only) — a documented lab-scope simplification.
 - **Migrations run in a dedicated pipeline stage, not the container's entrypoint.**
@@ -153,11 +146,11 @@ EventBridge → CodePipeline → CodeDeploy blue/green path.
   touch the image repository holding every previously-built image. Its own dedicated OIDC role
   (`EcrDeployRole`, created in that repo's `bootstrap.yaml` alongside the other two) keeps its
   permissions scoped to exactly that one stack and that one repository.
-- **Branchy logic lives in `scripts/`, not inline in workflow YAML.** `deploy-infra.yml`'s
-  `InitialImageUri` resolution (reuse the existing value once `EcsStack` exists, otherwise look
-  up the newest ECR tag) used to be an if/else block embedded directly in a `run:` step. It's now
-  `scripts/determine-image-uri.sh`, a plain, testable shell script the workflow just calls —
-  keeping the workflow file itself to short, single-purpose steps.
+- **`deploy-infra.yml` has no branchy logic at all, in a script or otherwise.** It used to run an
+  if/else block (later a separate script) to resolve `InitialImageUri` — reuse the existing value
+  once `EcsStack` exists, otherwise look up the newest ECR tag. The mutable `:latest` tag removed
+  the entire problem: there's nothing to resolve, so there's nothing to script. The workflow is
+  just checkout → configure credentials → package → deploy → print the ALB endpoint.
 
 ## One-time bootstrap (do this before the workflow can run at all)
 
@@ -186,16 +179,12 @@ again, but the workflow shouldn't have been able to do that unprompted at all. S
 `false` whenever intentionally spun down; only flip it to `true` while you actually want every
 push to auto-deploy.
 
-## After deploying: hand outputs to `todo-app`
+## After deploying: nothing to hand off to `todo-app` anymore
 
-The `todo-app` repo has no access to these CFN outputs — collect them once and set them there
-(see `todo-app/README.md` — the list is short, since non-secret config is now resolved by naming
-convention / SSM instead of being copied through GitHub). Two different stacks now hold these:
-
-```bash
-aws cloudformation describe-stacks --stack-name todo-dev-root --query "Stacks[0].Outputs"
-aws cloudformation describe-stacks --stack-name todo-dev-ecr --query "Stacks[0].Outputs"  # RepositoryUri
-```
+`todo-app/deploy/taskdef.json` is fully static (see its README) — every value in it, including
+both secret references, is derivable from the fixed account/region/`EnvironmentName` naming
+convention, not copied from this stack's outputs. There's nothing left to collect here and paste
+into `todo-app`'s GitHub secrets after a deploy.
 
 ## Verifying a deploy
 
@@ -265,10 +254,12 @@ CI run — none of them caught by `validate-template`:
    `GetTemplateSummary` internally to build the changeset; `ssm:*` is needed because `data.yaml`/
    `cache.yaml` create SSM parameters.
 9. **`deploy-infra.yml` recomputed `InitialImageUri` from the newest ECR tag on every run, which
-   breaks the moment `EcsStack` exists.** Once created, CodeDeploy exclusively owns the running
+   broke the moment `EcsStack` existed.** Once created, CodeDeploy exclusively owns the running
    task definition — any CloudFormation-driven change to the `Service` (even just re-supplying a
    different `ImageUri` that flows into its `TaskDefinition`) is hard-rejected by ECS:
    `"Unable to update task definition on services with a CODE_DEPLOY deployment controller."`
-   Fixed by making `InitialImageUri` sticky: once `EcsStack` exists, the workflow reuses whatever
-   value is already on the stack instead of recomputing it — all task-definition changes from
-   then on flow exclusively through CodeDeploy, which was the intended ownership model all along.
+   Superseded, not just fixed: switching ECR to a mutable `:latest` tag removed the parameter
+   (and the recomputation problem) entirely — `ecs.yaml` builds the URI itself, and
+   `TaskDefinition`'s `Image` property never changes across a `cloudformation deploy` again,
+   regardless of how many times `EcsStack` has already been created. CodeDeploy still exclusively
+   owns the *running* task definition after the first deploy, same as before.
