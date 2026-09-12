@@ -205,7 +205,8 @@ tradeoff for "one deploy creates/updates everything together," which is what was
 
 ## Real bugs found and fixed on the first actual deploy to this account
 
-Five things only surfaced once this was deployed for real, not caught by `validate-template`:
+Seven things only surfaced once this was deployed for real and pushed all the way through a live
+CI run — none of them caught by `validate-template`:
 
 1. **This AWS account already had a GitHub OIDC provider** (from a prior lab — IAM allows only
    one `token.actions.githubusercontent.com` provider per account). `bootstrap.yaml` no longer
@@ -214,8 +215,13 @@ Five things only surfaced once this was deployed for real, not caught by `valida
 2. **IAM now requires an OIDC trust policy to include a `sub` or `job_workflow_ref` condition
    that isn't wildcarded to everything**, even when `repository_id`/`repository_owner_id`
    conditions are already present and more durable. Added a `GitHubOwner` parameter and a
-   `StringLike` condition on `token.actions.githubusercontent.com:sub` (`repo:<owner>/<repo>:*`)
-   alongside the existing ID-based conditions in all three roles.
+   `StringLike` condition on `token.actions.githubusercontent.com:sub` alongside the ID-based
+   conditions — and verified via CloudTrail on a rejected `AssumeRoleWithWebIdentity` call that
+   this environment's actual `sub` claim isn't the plain GitHub-docs format
+   (`repo:{owner}/{repo}:ref:...`) but embeds numeric IDs directly:
+   `repo:{owner}@{owner_id}/{repo}@{repo_id}:ref:refs/heads/{branch}`. A condition built from
+   the documented format silently never matches and fails closed with a generic
+   "Not authorized" error — nothing points you at the actual claim shape except CloudTrail.
 3. **`AWS::EC2::SecurityGroup`'s `GroupDescription` rejects characters outside
    `a-zA-Z0-9. _-:/()#,@[]+=&;{}!$*`** — an apostrophe in one description broke deployment. It
    also silently rejects the trailing newline a YAML folded scalar (`>`) appends, even when
@@ -231,3 +237,11 @@ Five things only surfaced once this was deployed for real, not caught by `valida
    looked correct. Added an `EcsEgressToS3Gateway` rule using `DestinationPrefixListId` (the
    managed prefix list for the S3 endpoint), which is exactly the mechanism this rule type exists
    for — CIDR/security-group destinations can't express "wherever this gateway endpoint routes."
+6. **`CodePipelineServiceRole` was missing `codedeploy:GetApplication`.** Only surfaced once a
+   real CodePipeline execution actually reached the Deploy stage — the four other CodeDeploy
+   permissions it already had weren't sufficient.
+7. **`CodePipelineServiceRole` was also missing `ecs:RegisterTaskDefinition` and `iam:PassRole`
+   on the task execution/task role ARNs.** The `CodeDeployToECS` pipeline action registers the
+   new task definition revision itself, under the pipeline's own role — not delegated to
+   `CodeDeployServiceRole` as might be assumed. Added `TaskExecutionRoleArn`/`TaskRoleArn`
+   parameters to `pipeline.yaml` specifically to scope the `PassRole` grant to those two roles.

@@ -152,6 +152,8 @@ Resources:
         ListenerArn: !GetAtt EcsStack.Outputs.ListenerArn
         TargetGroupBlueName: !GetAtt EcsStack.Outputs.TargetGroupBlueName
         TargetGroupGreenName: !GetAtt EcsStack.Outputs.TargetGroupGreenName
+        TaskExecutionRoleArn: !GetAtt EcsStack.Outputs.TaskExecutionRoleArn
+        TaskRoleArn: !GetAtt EcsStack.Outputs.TaskRoleArn
       Tags: [{ Key: Project, Value: !Ref EnvironmentName }]
 
 Outputs:

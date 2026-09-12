@@ -24,8 +24,11 @@ Parameters:
     Description: >
       GitHub org/user login (e.g. "arnold-mataba"). IAM now requires every OIDC trust policy to
       include a `sub`/`job_workflow_ref` condition that isn't wildcarded to everything, even
-      when repository_id/repository_owner_id are already present — this is used only to build
-      that required `sub` condition alongside the ID-based ones.
+      when repository_id/repository_owner_id are already present — this is used to build that
+      required `sub` condition alongside the ID-based ones. Verified empirically (via CloudTrail
+      on a failed AssumeRoleWithWebIdentity) that this environment's actual `sub` claim format is
+      "repo:{owner}@{owner_id}/{repo}@{repo_id}:ref:refs/heads/{branch}" — not the plain GitHub
+      docs format "repo:{owner}/{repo}:ref:..." — so the condition must match that exact shape.
 
   InfraRepositoryId:
     Type: String
@@ -98,7 +101,7 @@ Resources:
                 token.actions.githubusercontent.com:repository_id: !Ref InfraRepositoryId
                 token.actions.githubusercontent.com:repository_owner_id: !Ref GitHubOwnerId
               StringLike:
-                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOwner}/todo-infra:*"
+                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOwner}@${GitHubOwnerId}/todo-infra@${InfraRepositoryId}:*"
       Policies:
         - PolicyName: cloudformation-deploy
           PolicyDocument:
@@ -188,7 +191,7 @@ Resources:
                 token.actions.githubusercontent.com:repository_id: !Ref AppRepositoryId
                 token.actions.githubusercontent.com:repository_owner_id: !Ref GitHubOwnerId
               StringLike:
-                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOwner}/todo-app:*"
+                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOwner}@${GitHubOwnerId}/todo-app@${AppRepositoryId}:*"
       Policies:
         - PolicyName: ecr-push-and-artifact-upload
           PolicyDocument:
@@ -236,7 +239,7 @@ Resources:
                 token.actions.githubusercontent.com:repository_id: !Ref EcrRepositoryId
                 token.actions.githubusercontent.com:repository_owner_id: !Ref GitHubOwnerId
               StringLike:
-                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOwner}/todo-ecr:*"
+                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOwner}@${GitHubOwnerId}/todo-ecr@${EcrRepositoryId}:*"
       Policies:
         - PolicyName: deploy-ecr-stack
           PolicyDocument:
