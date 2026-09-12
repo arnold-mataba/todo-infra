@@ -169,7 +169,7 @@ shared bootstrap rather than duplicating one per repo.
 
 **Secrets** (masked — ARNs/account IDs/repo IDs/bucket names, per best-practice: identifiers stay
 in Secrets, never Variables):
-`INFRA_DEPLOY_ROLE_ARN`, `GITHUB_OWNER_ID`, `INFRA_REPOSITORY_ID`, `APP_REPOSITORY_ID`,
+`INFRA_DEPLOY_ROLE_ARN`, `GH_OWNER_ID`, `INFRA_REPOSITORY_ID`, `APP_REPOSITORY_ID`,
 `ECR_REPOSITORY_ID`, `ARTIFACT_BUCKET_NAME`, `TEMPLATE_BUCKET_NAME`
 
 **Variables** (plain, non-identifying config — also referenced as `vars.*`, never hardcoded as a

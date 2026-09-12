@@ -33,7 +33,7 @@ jobs:
             --no-fail-on-empty-changeset \
             --parameter-overrides \
               EnvironmentName=${{ vars.ENVIRONMENT_NAME }} \
-              GitHubOwnerId=${{ secrets.GITHUB_OWNER_ID }} \
+              GitHubOwnerId=${{ secrets.GH_OWNER_ID }} \
               InfraRepositoryId=${{ secrets.INFRA_REPOSITORY_ID }} \
               AppRepositoryId=${{ secrets.APP_REPOSITORY_ID }} \
               EcrRepositoryId=${{ secrets.ECR_REPOSITORY_ID }} \
