@@ -245,3 +245,17 @@ CI run — none of them caught by `validate-template`:
    new task definition revision itself, under the pipeline's own role — not delegated to
    `CodeDeployServiceRole` as might be assumed. Added `TaskExecutionRoleArn`/`TaskRoleArn`
    parameters to `pipeline.yaml` specifically to scope the `PassRole` grant to those two roles.
+8. **`InfraDeployRole`/`EcrDeployRole` were missing `cloudformation:GetTemplateSummary` and
+   `ssm:*`.** Every earlier deploy in this README used local admin credentials, which mask
+   permission gaps in the CI role itself — this only surfaced the first time `deploy-infra.yml`
+   actually ran end-to-end under its own role. `aws cloudformation deploy` calls
+   `GetTemplateSummary` internally to build the changeset; `ssm:*` is needed because `data.yaml`/
+   `cache.yaml` create SSM parameters.
+9. **`deploy-infra.yml` recomputed `InitialImageUri` from the newest ECR tag on every run, which
+   breaks the moment `EcsStack` exists.** Once created, CodeDeploy exclusively owns the running
+   task definition — any CloudFormation-driven change to the `Service` (even just re-supplying a
+   different `ImageUri` that flows into its `TaskDefinition`) is hard-rejected by ECS:
+   `"Unable to update task definition on services with a CODE_DEPLOY deployment controller."`
+   Fixed by making `InitialImageUri` sticky: once `EcsStack` exists, the workflow reuses whatever
+   value is already on the stack instead of recomputing it — all task-definition changes from
+   then on flow exclusively through CodeDeploy, which was the intended ownership model all along.
