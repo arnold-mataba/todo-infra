@@ -298,10 +298,13 @@ def edge(src, tgt, label="", style_extra="", points=None):
 def edge_dashed(src, tgt, label="", style_extra="", points=None):
     add_cell(nid("edge"), EDGE_DASHED + style_extra, 0, 0, 0, 0, root_id, label, vertex=0, edge=1, source=src, target=tgt, points=points)
 
-edge(users_id, internet_id)
-edge(internet_id, igw_id)
-edge(igw_id, az_a_ids["alb"])
-edge(igw_id, az_b_ids["alb"])
+edge(users_id, internet_id, "", "exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;")
+# Internet arrives at the IGW's left face; the two branches down to the ALB nodes leave from the
+# IGW's bottom face, split left/right so all three lines visibly diverge at the icon instead of
+# reading as one line passing straight through it.
+edge(internet_id, igw_id, "", "exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;")
+edge(igw_id, az_a_ids["alb"], "", "exitX=0.25;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;")
+edge(igw_id, az_b_ids["alb"], "", "exitX=0.75;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;")
 edge(az_a_ids["alb"], az_a_ids["ecs"], ":8080", "exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;")
 edge(az_b_ids["alb"], az_b_ids["ecs"], ":8080", "exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;")
 
