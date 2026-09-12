@@ -24,7 +24,9 @@ Resources:
     Type: AWS::ElastiCache::SubnetGroup
     Properties:
       Description: Private cache subnets for Redis
-      SubnetIds: !Split [",", !Ref PrivateCacheSubnetIds]
+      SubnetIds: !Split
+        - ","
+        - !Ref PrivateCacheSubnetIds
 
   RedisReplicationGroup:
     Type: AWS::ElastiCache::ReplicationGroup

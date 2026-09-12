@@ -32,7 +32,9 @@ Resources:
     Type: AWS::RDS::DBSubnetGroup
     Properties:
       DBSubnetGroupDescription: Private data subnets for RDS + RDS Proxy
-      SubnetIds: !Split [",", !Ref PrivateDataSubnetIds]
+      SubnetIds: !Split
+        - ","
+        - !Ref PrivateDataSubnetIds
 
   DBInstance:
     Type: AWS::RDS::DBInstance
@@ -66,7 +68,8 @@ Resources:
         Version: "2012-10-17"
         Statement:
           - Effect: Allow
-            Principal: { Service: rds.amazonaws.com }
+            Principal:
+              Service: rds.amazonaws.com
             Action: sts:AssumeRole
       Policies:
         - PolicyName: read-db-secret
@@ -84,7 +87,9 @@ Resources:
       EngineFamily: POSTGRESQL
       RoleArn: !GetAtt RDSProxyRole.Arn
       RequireTLS: true
-      VpcSubnetIds: !Split [",", !Ref PrivateDataSubnetIds]
+      VpcSubnetIds: !Split
+        - ","
+        - !Ref PrivateDataSubnetIds
       VpcSecurityGroupIds:
         - !Ref RdsProxySecurityGroupId
       Auth:
@@ -102,7 +107,6 @@ Resources:
       TargetGroupName: default
       DBInstanceIdentifiers:
         - !Ref DBInstance
-      ConnectionPoolConfigurationInfo: {}
 
   DbProxyEndpointParam:
     Type: AWS::SSM::Parameter

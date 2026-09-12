@@ -59,8 +59,11 @@ Resources:
     Properties:
       ClusterName: !Sub "${EnvironmentName}-cluster"
       ClusterSettings:
-        - { Name: containerInsights, Value: enabled }
-      Tags: [{ Key: Project, Value: !Ref EnvironmentName }]
+        - Name: containerInsights
+          Value: enabled
+      Tags:
+        - Key: Project
+          Value: !Ref EnvironmentName
 
   AppLogGroup:
     Type: AWS::Logs::LogGroup
@@ -76,7 +79,9 @@ Resources:
       GenerateSecretString:
         PasswordLength: 50
         ExcludePunctuation: true
-      Tags: [{ Key: Project, Value: !Ref EnvironmentName }]
+      Tags:
+        - Key: Project
+          Value: !Ref EnvironmentName
 
   TaskExecutionRole:
     Type: AWS::IAM::Role
@@ -86,7 +91,8 @@ Resources:
         Version: "2012-10-17"
         Statement:
           - Effect: Allow
-            Principal: { Service: ecs-tasks.amazonaws.com }
+            Principal:
+              Service: ecs-tasks.amazonaws.com
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
@@ -117,14 +123,16 @@ Resources:
         Version: "2012-10-17"
         Statement:
           - Effect: Allow
-            Principal: { Service: ecs-tasks.amazonaws.com }
+            Principal:
+              Service: ecs-tasks.amazonaws.com
             Action: sts:AssumeRole
 
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
       Family: !Sub "${EnvironmentName}-todo-app"
-      RequiresCompatibilities: [FARGATE]
+      RequiresCompatibilities:
+        - FARGATE
       NetworkMode: awsvpc
       Cpu: !Ref TaskCpu
       Memory: !Ref TaskMemory
@@ -166,10 +174,14 @@ Resources:
       Name: !Sub "${EnvironmentName}-alb"
       Type: application
       Scheme: internet-facing
-      Subnets: !Split [",", !Ref PublicSubnetIds]
+      Subnets: !Split
+        - ","
+        - !Ref PublicSubnetIds
       SecurityGroups:
         - !Ref AlbSecurityGroupId
-      Tags: [{ Key: Project, Value: !Ref EnvironmentName }]
+      Tags:
+        - Key: Project
+          Value: !Ref EnvironmentName
 
   TargetGroupBlue:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
@@ -183,7 +195,8 @@ Resources:
       HealthCheckIntervalSeconds: 15
       HealthyThresholdCount: 2
       UnhealthyThresholdCount: 3
-      Matcher: { HttpCode: "200" }
+      Matcher:
+        HttpCode: "200"
 
   TargetGroupGreen:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
@@ -197,7 +210,8 @@ Resources:
       HealthCheckIntervalSeconds: 15
       HealthyThresholdCount: 2
       UnhealthyThresholdCount: 3
-      Matcher: { HttpCode: "200" }
+      Matcher:
+        HttpCode: "200"
 
   Listener:
     Type: AWS::ElasticLoadBalancingV2::Listener
@@ -218,12 +232,15 @@ Resources:
       TaskDefinition: !Ref TaskDefinition
       DesiredCount: !Ref DesiredTaskCount
       LaunchType: FARGATE
-      DeploymentController: { Type: CODE_DEPLOY }
+      DeploymentController:
+        Type: CODE_DEPLOY
       HealthCheckGracePeriodSeconds: 60
       NetworkConfiguration:
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
-          Subnets: !Split [",", !Ref PrivateEcsSubnetIds]
+          Subnets: !Split
+            - ","
+            - !Ref PrivateEcsSubnetIds
           SecurityGroups:
             - !Ref EcsSecurityGroupId
       LoadBalancers:

@@ -49,7 +49,8 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Ref ArtifactBucketName
-      VersioningConfiguration: { Status: Enabled }
+      VersioningConfiguration:
+        Status: Enabled
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -57,8 +58,11 @@ Resources:
         RestrictPublicBuckets: true
       BucketEncryption:
         ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
-      Tags: [{ Key: Project, Value: !Ref EnvironmentName }]
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      Tags:
+        - Key: Project
+          Value: !Ref EnvironmentName
 
   CodePipelineServiceRole:
     Type: AWS::IAM::Role
@@ -68,7 +72,8 @@ Resources:
         Version: "2012-10-17"
         Statement:
           - Effect: Allow
-            Principal: { Service: codepipeline.amazonaws.com }
+            Principal:
+              Service: codepipeline.amazonaws.com
             Action: sts:AssumeRole
       Policies:
         - PolicyName: pipeline-permissions
@@ -76,7 +81,11 @@ Resources:
             Version: "2012-10-17"
             Statement:
               - Effect: Allow
-                Action: [s3:GetObject, s3:GetObjectVersion, s3:GetBucketVersioning, s3:PutObject]
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketVersioning
+                  - s3:PutObject
                 Resource:
                   - !GetAtt ArtifactBucket.Arn
                   - !Sub "${ArtifactBucket.Arn}/*"
@@ -114,7 +123,8 @@ Resources:
         Version: "2012-10-17"
         Statement:
           - Effect: Allow
-            Principal: { Service: codebuild.amazonaws.com }
+            Principal:
+              Service: codebuild.amazonaws.com
             Action: sts:AssumeRole
       Policies:
         - PolicyName: run-django-migrations
@@ -130,7 +140,11 @@ Resources:
                   - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${EnvironmentName}-migrate"
                   - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${EnvironmentName}-migrate:*"
               - Effect: Allow
-                Action: [s3:GetObject, s3:GetObjectVersion, s3:GetBucketVersioning, s3:PutObject]
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketVersioning
+                  - s3:PutObject
                 Resource:
                   - !GetAtt ArtifactBucket.Arn
                   - !Sub "${ArtifactBucket.Arn}/*"
@@ -149,7 +163,9 @@ Resources:
                   ArnEquals:
                     ecs:cluster: !Sub "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}"
               - Effect: Allow
-                Action: [ecs:DescribeTasks, ecs:StopTask]
+                Action:
+                  - ecs:DescribeTasks
+                  - ecs:StopTask
                 Resource: !Sub "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task/${ClusterName}/*"
 
   MigrateProject:
@@ -194,7 +210,9 @@ Resources:
                 - EXIT_CODE=$(aws ecs describe-tasks --cluster "${ClusterName}" --tasks "$TASK_ARN" --query "tasks[0].containers[0].exitCode" --output text)
                 - echo "Migration task exit code -> $EXIT_CODE"
                 - test "$EXIT_CODE" = "0"
-      Tags: [{ Key: Project, Value: !Ref EnvironmentName }]
+      Tags:
+        - Key: Project
+          Value: !Ref EnvironmentName
 
   CodeDeployServiceRole:
     Type: AWS::IAM::Role
@@ -204,7 +222,8 @@ Resources:
         Version: "2012-10-17"
         Statement:
           - Effect: Allow
-            Principal: { Service: codedeploy.amazonaws.com }
+            Principal:
+              Service: codedeploy.amazonaws.com
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AWSCodeDeployRoleForECS
@@ -304,7 +323,8 @@ Resources:
         Version: "2012-10-17"
         Statement:
           - Effect: Allow
-            Principal: { Service: events.amazonaws.com }
+            Principal:
+              Service: events.amazonaws.com
             Action: sts:AssumeRole
       Policies:
         - PolicyName: start-pipeline
@@ -321,12 +341,17 @@ Resources:
       Name: !Sub "${EnvironmentName}-ecr-push-triggers-pipeline"
       Description: New image pushed to the todo-app ECR repo triggers the deploy pipeline.
       EventPattern:
-        source: [aws.ecr]
-        detail-type: ["ECR Image Action"]
+        source:
+          - aws.ecr
+        detail-type:
+          - "ECR Image Action"
         detail:
-          action-type: [PUSH]
-          result: [SUCCESS]
-          repository-name: [!Ref EcrRepositoryName]
+          action-type:
+            - PUSH
+          result:
+            - SUCCESS
+          repository-name:
+            - !Ref EcrRepositoryName
       Targets:
         - Id: StartTodoAppPipeline
           Arn: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${Pipeline}"

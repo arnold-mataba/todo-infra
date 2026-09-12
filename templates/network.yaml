@@ -49,69 +49,103 @@ Resources:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPC
-      AvailabilityZone: !Select [0, !GetAZs ""]
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs ""
       CidrBlock: 10.0.0.0/24
       MapPublicIpOnLaunch: true
-      Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-public-a" }]
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-public-a"
   PublicSubnetB:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPC
-      AvailabilityZone: !Select [1, !GetAZs ""]
+      AvailabilityZone: !Select
+        - 1
+        - !GetAZs ""
       CidrBlock: 10.0.1.0/24
       MapPublicIpOnLaunch: true
-      Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-public-b" }]
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-public-b"
 
   PrivateEcsSubnetA:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPC
-      AvailabilityZone: !Select [0, !GetAZs ""]
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs ""
       CidrBlock: 10.0.10.0/24
-      Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-private-ecs-a" }]
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-private-ecs-a"
   PrivateEcsSubnetB:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPC
-      AvailabilityZone: !Select [1, !GetAZs ""]
+      AvailabilityZone: !Select
+        - 1
+        - !GetAZs ""
       CidrBlock: 10.0.11.0/24
-      Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-private-ecs-b" }]
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-private-ecs-b"
 
   PrivateDataSubnetA:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPC
-      AvailabilityZone: !Select [0, !GetAZs ""]
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs ""
       CidrBlock: 10.0.20.0/24
-      Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-private-data-a" }]
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-private-data-a"
   PrivateDataSubnetB:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPC
-      AvailabilityZone: !Select [1, !GetAZs ""]
+      AvailabilityZone: !Select
+        - 1
+        - !GetAZs ""
       CidrBlock: 10.0.21.0/24
-      Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-private-data-b" }]
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-private-data-b"
 
   PrivateCacheSubnetA:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPC
-      AvailabilityZone: !Select [0, !GetAZs ""]
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs ""
       CidrBlock: 10.0.30.0/24
-      Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-private-cache-a" }]
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-private-cache-a"
   PrivateCacheSubnetB:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPC
-      AvailabilityZone: !Select [1, !GetAZs ""]
+      AvailabilityZone: !Select
+        - 1
+        - !GetAZs ""
       CidrBlock: 10.0.31.0/24
-      Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-private-cache-b" }]
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-private-cache-b"
 
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref VPC
-      Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-public-rt" }]
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-public-rt"
   PublicDefaultRoute:
     Type: AWS::EC2::Route
     DependsOn: IGWAttachment
@@ -121,34 +155,52 @@ Resources:
       GatewayId: !Ref InternetGateway
   PublicSubnetARouteAssoc:
     Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties: { SubnetId: !Ref PublicSubnetA, RouteTableId: !Ref PublicRouteTable }
+    Properties:
+      SubnetId: !Ref PublicSubnetA
+      RouteTableId: !Ref PublicRouteTable
   PublicSubnetBRouteAssoc:
     Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties: { SubnetId: !Ref PublicSubnetB, RouteTableId: !Ref PublicRouteTable }
+    Properties:
+      SubnetId: !Ref PublicSubnetB
+      RouteTableId: !Ref PublicRouteTable
 
   PrivateRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref VPC
-      Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-private-rt" }]
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-private-rt"
   PrivateEcsSubnetARouteAssoc:
     Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties: { SubnetId: !Ref PrivateEcsSubnetA, RouteTableId: !Ref PrivateRouteTable }
+    Properties:
+      SubnetId: !Ref PrivateEcsSubnetA
+      RouteTableId: !Ref PrivateRouteTable
   PrivateEcsSubnetBRouteAssoc:
     Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties: { SubnetId: !Ref PrivateEcsSubnetB, RouteTableId: !Ref PrivateRouteTable }
+    Properties:
+      SubnetId: !Ref PrivateEcsSubnetB
+      RouteTableId: !Ref PrivateRouteTable
   PrivateDataSubnetARouteAssoc:
     Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties: { SubnetId: !Ref PrivateDataSubnetA, RouteTableId: !Ref PrivateRouteTable }
+    Properties:
+      SubnetId: !Ref PrivateDataSubnetA
+      RouteTableId: !Ref PrivateRouteTable
   PrivateDataSubnetBRouteAssoc:
     Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties: { SubnetId: !Ref PrivateDataSubnetB, RouteTableId: !Ref PrivateRouteTable }
+    Properties:
+      SubnetId: !Ref PrivateDataSubnetB
+      RouteTableId: !Ref PrivateRouteTable
   PrivateCacheSubnetARouteAssoc:
     Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties: { SubnetId: !Ref PrivateCacheSubnetA, RouteTableId: !Ref PrivateRouteTable }
+    Properties:
+      SubnetId: !Ref PrivateCacheSubnetA
+      RouteTableId: !Ref PrivateRouteTable
   PrivateCacheSubnetBRouteAssoc:
     Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties: { SubnetId: !Ref PrivateCacheSubnetB, RouteTableId: !Ref PrivateRouteTable }
+    Properties:
+      SubnetId: !Ref PrivateCacheSubnetB
+      RouteTableId: !Ref PrivateRouteTable
 
   ALBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -156,11 +208,21 @@ Resources:
       GroupDescription: ALB - public ingress on 80/443, egress restricted to the ECS SG only
       VpcId: !Ref VPC
       SecurityGroupIngress:
-        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0 }
-        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0 }
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
       SecurityGroupEgress:
-        - { IpProtocol: "-1", CidrIp: 127.0.0.1/32, Description: "placeholder - real egress added as explicit SecurityGroupEgress resources" }
-      Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-alb-sg" }]
+        - IpProtocol: "-1"
+          CidrIp: 127.0.0.1/32
+          Description: "placeholder - real egress added as explicit SecurityGroupEgress resources"
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-alb-sg"
 
   ECSSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -168,8 +230,12 @@ Resources:
       GroupDescription: ECS tasks - ingress from ALB only, egress restricted to proxy/redis/endpoints
       VpcId: !Ref VPC
       SecurityGroupEgress:
-        - { IpProtocol: "-1", CidrIp: 127.0.0.1/32, Description: "placeholder - real egress added as explicit SecurityGroupEgress resources" }
-      Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-ecs-sg" }]
+        - IpProtocol: "-1"
+          CidrIp: 127.0.0.1/32
+          Description: "placeholder - real egress added as explicit SecurityGroupEgress resources"
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-ecs-sg"
 
   RDSProxySecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -177,22 +243,30 @@ Resources:
       GroupDescription: RDS Proxy - ingress from ECS only, egress restricted to RDS only
       VpcId: !Ref VPC
       SecurityGroupEgress:
-        - { IpProtocol: "-1", CidrIp: 127.0.0.1/32, Description: "placeholder - real egress added as explicit SecurityGroupEgress resources" }
-      Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-rds-proxy-sg" }]
+        - IpProtocol: "-1"
+          CidrIp: 127.0.0.1/32
+          Description: "placeholder - real egress added as explicit SecurityGroupEgress resources"
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-rds-proxy-sg"
 
   RDSSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: RDS - ingress from RDS Proxy only (app never connects to RDS directly)
       VpcId: !Ref VPC
-      Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-rds-sg" }]
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-rds-sg"
 
   RedisSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: ElastiCache Redis - ingress from ECS only
       VpcId: !Ref VPC
-      Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-redis-sg" }]
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-redis-sg"
 
   VPCEndpointSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -200,8 +274,13 @@ Resources:
       GroupDescription: Interface VPC endpoints - ingress 443 from the whole VPC CIDR, reusable shared infra for any future workload in the VPC
       VpcId: !Ref VPC
       SecurityGroupIngress:
-        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: !Ref VpcCidr }
-      Tags: [{ Key: Name, Value: !Sub "${EnvironmentName}-vpce-sg" }]
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref VpcCidr
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-vpce-sg"
 
   AlbEgressToEcs:
     Type: AWS::EC2::SecurityGroupEgress
@@ -295,7 +374,8 @@ Resources:
       VpcId: !Ref VPC
       ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
       VpcEndpointType: Gateway
-      RouteTableIds: [!Ref PrivateRouteTable]
+      RouteTableIds:
+        - !Ref PrivateRouteTable
 
   EcrApiEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -304,8 +384,11 @@ Resources:
       ServiceName: !Sub "com.amazonaws.${AWS::Region}.ecr.api"
       VpcEndpointType: Interface
       PrivateDnsEnabled: true
-      SubnetIds: [!Ref PrivateEcsSubnetA, !Ref PrivateEcsSubnetB]
-      SecurityGroupIds: [!Ref VPCEndpointSecurityGroup]
+      SubnetIds:
+        - !Ref PrivateEcsSubnetA
+        - !Ref PrivateEcsSubnetB
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
 
   EcrDkrEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -314,8 +397,11 @@ Resources:
       ServiceName: !Sub "com.amazonaws.${AWS::Region}.ecr.dkr"
       VpcEndpointType: Interface
       PrivateDnsEnabled: true
-      SubnetIds: [!Ref PrivateEcsSubnetA, !Ref PrivateEcsSubnetB]
-      SecurityGroupIds: [!Ref VPCEndpointSecurityGroup]
+      SubnetIds:
+        - !Ref PrivateEcsSubnetA
+        - !Ref PrivateEcsSubnetB
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
 
   LogsEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -324,8 +410,11 @@ Resources:
       ServiceName: !Sub "com.amazonaws.${AWS::Region}.logs"
       VpcEndpointType: Interface
       PrivateDnsEnabled: true
-      SubnetIds: [!Ref PrivateEcsSubnetA, !Ref PrivateEcsSubnetB]
-      SecurityGroupIds: [!Ref VPCEndpointSecurityGroup]
+      SubnetIds:
+        - !Ref PrivateEcsSubnetA
+        - !Ref PrivateEcsSubnetB
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
 
   SecretsManagerEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -334,8 +423,11 @@ Resources:
       ServiceName: !Sub "com.amazonaws.${AWS::Region}.secretsmanager"
       VpcEndpointType: Interface
       PrivateDnsEnabled: true
-      SubnetIds: [!Ref PrivateEcsSubnetA, !Ref PrivateEcsSubnetB]
-      SecurityGroupIds: [!Ref VPCEndpointSecurityGroup]
+      SubnetIds:
+        - !Ref PrivateEcsSubnetA
+        - !Ref PrivateEcsSubnetB
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
 
   SsmEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -344,8 +436,11 @@ Resources:
       ServiceName: !Sub "com.amazonaws.${AWS::Region}.ssm"
       VpcEndpointType: Interface
       PrivateDnsEnabled: true
-      SubnetIds: [!Ref PrivateEcsSubnetA, !Ref PrivateEcsSubnetB]
-      SecurityGroupIds: [!Ref VPCEndpointSecurityGroup]
+      SubnetIds:
+        - !Ref PrivateEcsSubnetA
+        - !Ref PrivateEcsSubnetB
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
 
 Outputs:
   VpcId:
@@ -353,13 +448,25 @@ Outputs:
   VpcCidr:
     Value: !Ref VpcCidr
   PublicSubnetIds:
-    Value: !Join [",", [!Ref PublicSubnetA, !Ref PublicSubnetB]]
+    Value: !Join
+      - ","
+      - - !Ref PublicSubnetA
+        - !Ref PublicSubnetB
   PrivateEcsSubnetIds:
-    Value: !Join [",", [!Ref PrivateEcsSubnetA, !Ref PrivateEcsSubnetB]]
+    Value: !Join
+      - ","
+      - - !Ref PrivateEcsSubnetA
+        - !Ref PrivateEcsSubnetB
   PrivateDataSubnetIds:
-    Value: !Join [",", [!Ref PrivateDataSubnetA, !Ref PrivateDataSubnetB]]
+    Value: !Join
+      - ","
+      - - !Ref PrivateDataSubnetA
+        - !Ref PrivateDataSubnetB
   PrivateCacheSubnetIds:
-    Value: !Join [",", [!Ref PrivateCacheSubnetA, !Ref PrivateCacheSubnetB]]
+    Value: !Join
+      - ","
+      - - !Ref PrivateCacheSubnetA
+        - !Ref PrivateCacheSubnetB
   AlbSecurityGroupId:
     Value: !Ref ALBSecurityGroup
   EcsSecurityGroupId:
