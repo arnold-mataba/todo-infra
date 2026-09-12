@@ -8,9 +8,9 @@ def nid(prefix):
     _id[0] += 1
     return f"{prefix}-{_id[0]}"
 
-def add_cell(cid, style, x, y, w, h, parent, value="", vertex=1, edge=0, source=None, target=None):
+def add_cell(cid, style, x, y, w, h, parent, value="", vertex=1, edge=0, source=None, target=None, points=None):
     c = {"id": cid, "style": style, "value": value, "parent": parent, "x": x, "y": y,
-         "w": w, "h": h, "vertex": vertex, "edge": edge, "source": source, "target": target}
+         "w": w, "h": h, "vertex": vertex, "edge": edge, "source": source, "target": target, "points": points}
     cells.append(c)
     return c
 
@@ -266,8 +266,11 @@ add_cell(cloud_id, group_style("mxgraph.aws4.group_aws_cloud_alt", "#232F3E"), C
 
 users_id = nid("users")
 internet_id = nid("internet")
-add_cell(users_id, icon_style("users", GENERAL), 60, 60 + cloud_h / 2 - 130, ICON_W, ICON_H, root_id, "Users")
-add_cell(internet_id, icon_style("internet_alt1", NETWORK), 60, 60 + cloud_h / 2 - 10, ICON_W, ICON_H, root_id, "Internet")
+# Positioned near the top, roughly level with the Internet Gateway — keeps the Users -> Internet
+# -> IGW chain in a clear horizontal band above everything else, instead of cutting across the
+# middle of the diagram through Platform Services / the AZ boxes to reach the IGW up top.
+add_cell(users_id, icon_style("users", GENERAL), 60, 22, ICON_W, ICON_H, root_id, "Users")
+add_cell(internet_id, icon_style("internet_alt1", NETWORK), 60, 162, ICON_W, ICON_H, root_id, "Internet")
 
 # Internet Gateway: a single VPC-attached resource, drawn straddling the VPC's top boundary
 # (half in, half out) — the standard AWS reference-architecture placement, since it's the one
@@ -281,17 +284,19 @@ add_cell(igw_id, icon_style("internet_gateway", NETWORK),
 
 # Standard AWS reference-architecture connector: solid, neutral gray, orthogonal, block arrow.
 # Matches the style used in AWS's own reference-architecture diagrams and drawio's AWS4 samples.
-EDGE = "edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;fontColor=#545B64;endArrow=block;elbow=vertical;strokeWidth=1.5;strokeColor=#545B64;"
+# labelBackgroundColor keeps text legible where a line/icon sits behind it instead of blending in.
+EDGE = ("edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;fontColor=#545B64;"
+        "labelBackgroundColor=#ffffff;endArrow=block;elbow=vertical;strokeWidth=1.5;strokeColor=#545B64;")
 # Dashed variant of the same neutral gray for control-plane/permission relationships (IAM/secrets
 # reads, VPC endpoint access) and async replication — dash pattern signals "not the primary data
 # path," not a different subsystem, so it stays the same color as every other connector.
 EDGE_DASHED = EDGE + "dashed=1;"
 
-def edge(src, tgt, label="", style_extra=""):
-    add_cell(nid("edge"), EDGE + style_extra, 0, 0, 0, 0, root_id, label, vertex=0, edge=1, source=src, target=tgt)
+def edge(src, tgt, label="", style_extra="", points=None):
+    add_cell(nid("edge"), EDGE + style_extra, 0, 0, 0, 0, root_id, label, vertex=0, edge=1, source=src, target=tgt, points=points)
 
-def edge_dashed(src, tgt, label=""):
-    add_cell(nid("edge"), EDGE_DASHED, 0, 0, 0, 0, root_id, label, vertex=0, edge=1, source=src, target=tgt)
+def edge_dashed(src, tgt, label="", style_extra="", points=None):
+    add_cell(nid("edge"), EDGE_DASHED + style_extra, 0, 0, 0, 0, root_id, label, vertex=0, edge=1, source=src, target=tgt, points=points)
 
 edge(users_id, internet_id)
 edge(internet_id, igw_id)
@@ -300,30 +305,44 @@ edge(igw_id, az_b_ids["alb"])
 edge(az_a_ids["alb"], az_a_ids["ecs"], ":8080", "exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;")
 edge(az_b_ids["alb"], az_b_ids["ecs"], ":8080", "exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;")
 
-edge(az_a_ids["ecs"], az_a_ids["data"], "writes :5432")
-edge(az_b_ids["ecs"], az_a_ids["data"], "writes :5432")
-edge(az_a_ids["data"], az_a_ids["rds"])
+TOP_BOTTOM = "exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;"
+# Named by the source's position relative to the target: LEFT_TO_RIGHT = source is left of
+# target, so it exits the source's right face and enters the target's left face.
+LEFT_TO_RIGHT = "exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;"
+RIGHT_TO_LEFT = "exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;"
+
+edge(az_a_ids["ecs"], az_a_ids["data"], "writes :5432", TOP_BOTTOM)
+edge(az_b_ids["ecs"], az_a_ids["data"], "writes :5432", RIGHT_TO_LEFT)
+edge(az_a_ids["data"], az_a_ids["rds"], "", TOP_BOTTOM)
 edge_dashed(az_a_ids["rds"], az_b_ids["rds"], "sync replication")
 
-edge(az_a_ids["ecs"], az_a_ids["cache"], "reads :6379")
-edge(az_b_ids["ecs"], az_a_ids["cache"], "reads :6379")
+edge(az_a_ids["ecs"], az_a_ids["cache"], "reads :6379", TOP_BOTTOM)
+edge(az_b_ids["ecs"], az_a_ids["cache"], "reads :6379", RIGHT_TO_LEFT)
 edge_dashed(az_a_ids["cache"], az_b_ids["cache"], "replication")
 
-edge_dashed(az_a_ids["ecs"], az_a_ids["vpce"])
-edge_dashed(az_b_ids["ecs"], az_b_ids["vpce"])
+edge_dashed(az_a_ids["ecs"], az_a_ids["vpce"], "", TOP_BOTTOM)
+edge_dashed(az_b_ids["ecs"], az_b_ids["vpce"], "", TOP_BOTTOM)
 
-edge_dashed(dbsecret_id, az_a_ids["data"], "secrets:GetSecretValue")
-edge_dashed(dbsecret_id, az_a_ids["ecs"])
-edge_dashed(djsecret_id, az_a_ids["ecs"])
-edge_dashed(ssm_id, az_a_ids["ecs"], "ssm:GetParameters")
-edge_dashed(ssm_id, az_b_ids["ecs"])
+# Config & Secrets sits left of the VPC — these enter every ECS icon from its left face so they
+# never stack on the same point as the ALB's top-face entry above.
+edge_dashed(dbsecret_id, az_a_ids["data"], "secrets:GetSecretValue", LEFT_TO_RIGHT)
+edge_dashed(dbsecret_id, az_a_ids["ecs"], "", LEFT_TO_RIGHT)
+edge_dashed(djsecret_id, az_a_ids["ecs"], "", LEFT_TO_RIGHT)
+edge_dashed(ssm_id, az_a_ids["ecs"], "ssm:GetParameters", LEFT_TO_RIGHT)
+# AZ B is past AZ A from Config & Secrets' viewpoint — routed through the clear band above the AZ
+# row (where the ECS Service note sits) instead of cutting across AZ A's boxes to get there.
+ssm_waypoint_y = vpc_abs_y + 55 + (ICON_H + SLOT_LABEL_H) / 2
+az_b_center_x = vpc_abs_x + rx + az_row_pos[1][0] + az_b_w / 2
+edge_dashed(ssm_id, az_b_ids["ecs"], "", points=[(az_b_center_x, ssm_waypoint_y)])
 
 edge(ecr_icon_id, eb_icon_id, "image PUSH event")
 edge(eb_icon_id, cp_icon_id, "StartPipelineExecution")
 edge(artifactbucket_id, cp_icon_id, "S3 source\n(taskdef.json + appspec.yaml)")
 edge(cp_icon_id, cd_icon_id)
 edge(cd_icon_id, az_a_ids["alb"], "blue/green traffic shift\n(shared listener, both AZs)", f"strokeColor={COMPUTE};strokeWidth=2;")
-edge(cd_icon_id, az_b_ids["alb"], "", f"strokeColor={COMPUTE};strokeWidth=2;")
+# Same reasoning as the ssm -> AZ B edge above: routed via the clear band above the AZ row
+# instead of cutting across AZ A to reach AZ B's ALB node.
+edge(cd_icon_id, az_b_ids["alb"], "", f"strokeColor={COMPUTE};strokeWidth=2;", points=[(az_b_center_x, ssm_waypoint_y)])
 
 mxfile = ET.Element("mxfile", host="app.diagrams.net")
 diagram = ET.SubElement(mxfile, "diagram", id="todo-app-arch", name="Network Architecture")
@@ -346,6 +365,11 @@ for c in cells:
     geom.set("as", "geometry")
     if c["edge"]:
         geom.set("relative", "1")
+        if c["points"]:
+            arr = ET.SubElement(geom, "Array")
+            arr.set("as", "points")
+            for px, py in c["points"]:
+                ET.SubElement(arr, "mxPoint", x=str(px), y=str(py))
 
 xml_str = ET.tostring(mxfile, encoding="unicode")
 out_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "architecture.drawio")
