@@ -24,23 +24,6 @@ jobs:
           role-to-assume: ${{ secrets.INFRA_DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      - name: Deploy bootstrap.yaml
-        run: |
-          aws cloudformation deploy \
-            --stack-name ${{ vars.ENVIRONMENT_NAME }}-bootstrap \
-            --template-file templates/bootstrap.yaml \
-            --capabilities CAPABILITY_NAMED_IAM \
-            --no-fail-on-empty-changeset \
-            --parameter-overrides \
-              EnvironmentName=${{ vars.ENVIRONMENT_NAME }} \
-              GitHubOwnerId=${{ secrets.GH_OWNER_ID }} \
-              InfraRepositoryId=${{ secrets.INFRA_REPOSITORY_ID }} \
-              AppRepositoryId=${{ secrets.APP_REPOSITORY_ID }} \
-              EcrRepositoryId=${{ secrets.ECR_REPOSITORY_ID }} \
-              ECRRepositoryName=${{ vars.ECR_REPOSITORY_NAME }} \
-              ArtifactBucketName=${{ secrets.ARTIFACT_BUCKET_NAME }} \
-              TemplateBucketName=${{ secrets.TEMPLATE_BUCKET_NAME }}
-
       - name: Package nested templates
         run: |
           aws cloudformation package \

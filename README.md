@@ -3,8 +3,9 @@
 CloudFormation infrastructure for the To-Do app: multi-AZ VPC, RDS PostgreSQL (Multi-AZ) behind
 RDS Proxy, ElastiCache Redis (replication group with automatic failover), ECS Fargate + ALB, and
 the CodePipeline/CodeDeploy blue/green deployment pipeline triggered by EventBridge on ECR image
-push. The ECR repository itself lives in a separate repo — see `todo-ecr` — deployed and
-versioned independently of everything here.
+push. Everything one-time/rarely-touched — the GitHub OIDC roles and the ECR repository itself —
+lives in a separate repo, `todo-bootstrap`, deployed and versioned independently of everything
+here.
 
 ## Network architecture diagram
 
@@ -15,9 +16,10 @@ AWS4 icon shapes built into draw.io, not a rendered image or an AI-interpreted t
 
 Region-level (outside the VPC — these are regional services, not VPC-resident) is laid out as a
 2x2 grid of clearly separated groups: **Bootstrap** (OIDC provider, all three IAM roles, template
-bucket), **ECR Repository** (its own repo and stack — `todo-ecr` — shown standalone rather than
-lumped into the pipeline group), **CI/CD Pipeline** (EventBridge rule, artifact bucket, CodePipeline, CodeDeploy),
-and **Configuration & Secrets** (both Secrets Manager secrets, all 5 SSM parameters). Each
+bucket — both live in `todo-bootstrap`), **ECR Repository** (its own stack in that same repo,
+shown standalone rather than lumped into the pipeline group), **CI/CD Pipeline** (EventBridge
+rule, artifact bucket, CodePipeline, CodeDeploy), and **Configuration & Secrets** (both Secrets
+Manager secrets, all 5 SSM parameters). Each
 Availability Zone is its own 2x2 grid of subnets (Public/ECS on top, Data/Cache below) — every
 resource label carries real detail (instance class, IAM role names, security group names, ports,
 storage size, auto-scaling config) rather than just a service name.
@@ -39,11 +41,12 @@ cd diagrams && python3 generate_drawio.py
 `ecs.yaml`, and `pipeline.yaml` as actual `AWS::CloudFormation::Stack` children — each one is
 created and updated as part of the root stack's own deploy, and receives its inputs as
 CloudFormation Parameters passed down from the root (sourced via `Fn::GetAtt` on an earlier
-sibling's `Outputs`), not via `Fn::ImportValue`/`Export`. Two things are deliberately *not*
-nested here: `templates/bootstrap.yaml` (deployed separately, first, because nothing can package
-or deploy the root stack before the IAM role and S3 template-staging bucket it creates exist),
-and ECR itself, which lives in the separate `todo-ecr` repo/stack — root.yaml only ever
-references it by *name* (`ECRRepositoryName`), never creates it or nests it.
+sibling's `Outputs`), not via `Fn::ImportValue`/`Export`. Bootstrap (the IAM roles + template
+bucket) and ECR are both deliberately *not* nested here — both live in the separate
+`todo-bootstrap` repo, deployed before and independently of this stack. Nothing here can even
+package or deploy the root stack before that repo's IAM role and S3 template-staging bucket
+exist; root.yaml only ever references the ECR repository by *name* (`ECRRepositoryName`), never
+creates it or nests it.
 
 Because the child templates are local files, deploying the root stack is a two-step process:
 
@@ -72,8 +75,8 @@ condition. `EcsStack` and `PipelineStack` only exist when that condition is true
 
 1. **First deploy**: leave `InitialImageUri` empty. Only `NetworkStack`/`DataStack`/
    `CacheStack` get created — no ECS, no ALB, no pipeline, and critically, no fake placeholder
-   image anywhere. (The ECR repository itself needs to exist first too — see `todo-ecr`'s
-   README; its deploy is fully independent of this one.)
+   image anywhere. (The ECR repository itself needs to exist first too — see
+   `todo-bootstrap`'s README; its deploy is fully independent of this one.)
 2. **One-time manual bootstrap push** (see below): build and push the *real* app image once,
    by hand, so ECR actually has a tag to reference.
 3. **Redeploy `root.yaml`** with `InitialImageUri` set to that real image URI. This creates
@@ -131,46 +134,25 @@ EventBridge → CodePipeline → CodeDeploy blue/green path.
   `taskdef.json`. One fewer place a deploy can silently go stale.
 - Full HA: RDS Multi-AZ standby + Redis replica. No AUTH token / TLS on Redis (private-subnet +
   security-group isolation only) — a documented lab-scope simplification.
-- **ECR lives in its own repo (`todo-ecr`), not nested under root.yaml.** It has no VPC/network
-  dependency and a completely independent lifecycle from the rest of the infrastructure — a
-  bad `ecs.yaml` change rolling back the root stack should never be able to touch the image
-  repository holding every previously-built image. Its own dedicated OIDC role (`EcrDeployRole`,
-  created here in `bootstrap.yaml` alongside the other two) keeps its permissions scoped to
-  exactly that one stack and that one repository.
+- **ECR lives in its own repo (`todo-bootstrap`), not nested under root.yaml.** It has no
+  VPC/network dependency and a completely independent lifecycle from the rest of the
+  infrastructure — a bad `ecs.yaml` change rolling back the root stack should never be able to
+  touch the image repository holding every previously-built image. Its own dedicated OIDC role
+  (`EcrDeployRole`, created in that repo's `bootstrap.yaml` alongside the other two) keeps its
+  permissions scoped to exactly that one stack and that one repository.
 
 ## One-time bootstrap (do this before the workflow can run at all)
 
-`bootstrap.yaml` creates the IAM role the GitHub Actions workflow assumes and the S3 bucket
-`cloudformation package` stages templates in — so it has to be deployed once with your own
-local/console credentials before CI can take over:
-
-```bash
-aws cloudformation deploy \
-  --stack-name todo-dev-bootstrap \
-  --template-file templates/bootstrap.yaml \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --parameter-overrides \
-    EnvironmentName=todo-dev \
-    GitHubOwnerId=<gh api users/<owner> --jq .id> \
-    InfraRepositoryId=<gh api repos/<owner>/todo-infra --jq .id> \
-    AppRepositoryId=<gh api repos/<owner>/todo-app --jq .id> \
-    EcrRepositoryId=<gh api repos/<owner>/todo-ecr --jq .id> \
-    ECRRepositoryName=todo-app \
-    ArtifactBucketName=todo-app-pipeline-artifacts-<your-account-id> \
-    TemplateBucketName=todo-app-cfn-templates-<your-account-id>
-```
-
-`GitHubOwnerId`/`*RepositoryId` are numeric IDs, not names — they're stable across org/repo
-renames, unlike a `sub` claim built from the "owner/repo" string. This one bootstrap stack
-creates the OIDC roles for all three repos (`todo-infra`, `todo-app`, `todo-ecr`) — extending a
-shared bootstrap rather than duplicating one per repo.
+The IAM role this repo's GitHub Actions workflow assumes, and the S3 bucket `cloudformation
+package` stages templates in, are both created by `todo-bootstrap`'s `bootstrap.yaml` — not
+anything in this repo. See `todo-bootstrap/README.md` "Deploying bootstrap.yaml" for the full
+one-time manual deploy command; it has to run before this repo's workflow can do anything.
 
 ## Required GitHub repo configuration (`todo-infra`)
 
-**Secrets** (masked — ARNs/account IDs/repo IDs/bucket names, per best-practice: identifiers stay
-in Secrets, never Variables):
-`INFRA_DEPLOY_ROLE_ARN`, `GH_OWNER_ID`, `INFRA_REPOSITORY_ID`, `APP_REPOSITORY_ID`,
-`ECR_REPOSITORY_ID`, `ARTIFACT_BUCKET_NAME`, `TEMPLATE_BUCKET_NAME`
+**Secrets** (masked — ARNs/bucket names, per best-practice: identifiers stay in Secrets, never
+Variables): `INFRA_DEPLOY_ROLE_ARN`, `ARTIFACT_BUCKET_NAME`, `TEMPLATE_BUCKET_NAME` (all three
+come from `todo-bootstrap`'s stack outputs)
 
 **Variables** (plain, non-identifying config — also referenced as `vars.*`, never hardcoded as a
 literal in the workflow): `ENVIRONMENT_NAME` (`todo-dev`), `AWS_REGION` (e.g. `us-east-1`),
@@ -205,7 +187,7 @@ tradeoff for "one deploy creates/updates everything together," which is what was
 
 ## Real bugs found and fixed on the first actual deploy to this account
 
-Seven things only surfaced once this was deployed for real and pushed all the way through a live
+Nine things only surfaced once this was deployed for real and pushed all the way through a live
 CI run — none of them caught by `validate-template`:
 
 1. **This AWS account already had a GitHub OIDC provider** (from a prior lab — IAM allows only

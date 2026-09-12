@@ -140,10 +140,10 @@ boot = group_spec("Bootstrap  (bootstrap.yaml — one-time manual deploy)", "mxg
 g_icon(boot, "GitHub OIDC Identity Provider\ntoken.actions.githubusercontent.com", "identity_and_access_management_iam_role", SECURITY)
 g_icon(boot, "InfraDeployRole\ntodo-dev-infra-deploy-role\ntrust: repo=todo-infra", "identity_and_access_management_iam_role", SECURITY)
 g_icon(boot, "AppBuildRole\ntodo-dev-app-build-role\ntrust: repo=todo-app", "identity_and_access_management_iam_role", SECURITY)
-g_icon(boot, "EcrDeployRole\ntodo-dev-ecr-deploy-role\ntrust: repo=todo-ecr", "identity_and_access_management_iam_role", SECURITY)
+g_icon(boot, "EcrDeployRole\ntodo-dev-ecr-deploy-role\ntrust: repo=todo-bootstrap", "identity_and_access_management_iam_role", SECURITY)
 g_icon(boot, "Template Bucket (S3)\ncfn-templates staging\nfor `cfn package`", "simple_storage_service_bucket", STORAGE)
 
-ecr_g = group_spec("ECR Repository  (own repo: todo-ecr — own stack)", "mxgraph.aws4.group_generic", COMPUTE,
+ecr_g = group_spec("ECR Repository  (own stack, in todo-bootstrap repo)", "mxgraph.aws4.group_generic", COMPUTE,
                     pad_top=45, pad_right=25, pad_bottom=25, pad_left=25, gap=30)
 ecr_icon_id = g_icon(ecr_g, "todo-app\nImageTagMutability: IMMUTABLE\nScanOnPush: true", "elastic_container_registry", COMPUTE)
 g_note(ecr_g, "Lifecycle policy: expire, keep\nlast 5 images (imageCountMoreThan)", h=70)
