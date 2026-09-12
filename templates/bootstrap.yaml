@@ -124,6 +124,7 @@ Resources:
                   - cloudformation:GetTemplate
                   - cloudformation:ListStackResources
                   - cloudformation:ValidateTemplate
+                  - cloudformation:GetTemplateSummary
                 Resource:
                   - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${EnvironmentName}-*/*"
               - Sid: IamOnTodoRolesOnly
@@ -171,6 +172,7 @@ Resources:
                   - logs:*
                   - s3:*
                   - secretsmanager:*
+                  - ssm:*
                   - cloudwatch:*
                 Resource: "*"
 
@@ -262,6 +264,7 @@ Resources:
                   - cloudformation:GetTemplate
                   - cloudformation:ListStackResources
                   - cloudformation:ValidateTemplate
+                  - cloudformation:GetTemplateSummary
                 Resource:
                   - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${EnvironmentName}-ecr*/*"
               - Sid: ManageEcrRepository
