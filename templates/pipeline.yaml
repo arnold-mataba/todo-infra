@@ -1,15 +1,12 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: >
+Description: >-
   Deploy pipeline: an ECR image push fires an EventBridge rule that starts CodePipeline, which
-  pulls the deploy artifact (appspec.yaml + a fully-rendered taskdef.json, image URI already
-  baked in) from S3 and hands it to CodeDeploy for an ECS blue/green traffic shift.
-
-  Design note: CodePipeline's native "ECR" source-action type watches one fixed image tag,
-  which conflicts with immutable git-SHA tagging (no floating tag to watch). Instead, the
-  todo-app workflow renders the real image URI directly into taskdef.json and uploads it (with
-  appspec.yaml) to S3 on every build — so the only source action here is S3, and EventBridge
-  (keyed off the actual ECR push event) is what starts the pipeline, satisfying the "EventBridge
-  detects push, triggers CodePipeline" requirement without needing a floating tag.
+  pulls the deploy artifact (appspec.yaml + a fully-rendered taskdef.json) from S3 (native "ECR"
+  source watches one fixed tag, incompatible with immutable git-SHA tags), runs Django
+  migrations once as a one-off ECS task (Migrate stage - blocks Deploy on non-zero exit, so
+  migrations never race across the multiple tasks a blue/green deploy starts concurrently), then
+  hands off to CodeDeploy for the ECS blue/green traffic shift. See README for the full design
+  rationale on each stage.
 
 Parameters:
   EnvironmentName:
@@ -40,6 +37,12 @@ Parameters:
     Type: String
   TaskRoleArn:
     Type: String
+  PrivateEcsSubnetIds:
+    Type: String
+    Description: Comma-joined subnet IDs (from network.yaml) the one-off migrate task launches into.
+  EcsSecurityGroupId:
+    Type: String
+    Description: Security group (from network.yaml) the one-off migrate task launches with.
 
 Resources:
   ArtifactBucket:
@@ -97,6 +100,101 @@ Resources:
                 Resource:
                   - !Ref TaskExecutionRoleArn
                   - !Ref TaskRoleArn
+              - Effect: Allow
+                Action:
+                  - codebuild:StartBuild
+                  - codebuild:BatchGetBuilds
+                Resource: !GetAtt MigrateProject.Arn
+
+  MigrateProjectRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${EnvironmentName}-migrate-codebuild-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: codebuild.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: run-django-migrations
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${EnvironmentName}-migrate"
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${EnvironmentName}-migrate:*"
+              - Effect: Allow
+                Action: [s3:GetObject, s3:GetObjectVersion, s3:GetBucketVersioning, s3:PutObject]
+                Resource:
+                  - !GetAtt ArtifactBucket.Arn
+                  - !Sub "${ArtifactBucket.Arn}/*"
+              - Effect: Allow
+                Action: ecs:RegisterTaskDefinition
+                Resource: "*"
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource:
+                  - !Ref TaskExecutionRoleArn
+                  - !Ref TaskRoleArn
+              - Effect: Allow
+                Action: ecs:RunTask
+                Resource: !Sub "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/${EnvironmentName}-todo-app:*"
+                Condition:
+                  ArnEquals:
+                    ecs:cluster: !Sub "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}"
+              - Effect: Allow
+                Action: [ecs:DescribeTasks, ecs:StopTask]
+                Resource: !Sub "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task/${ClusterName}/*"
+
+  MigrateProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "${EnvironmentName}-migrate"
+      Description: >-
+        Registers the incoming taskdef.json and runs it once as a one-off ECS task with the
+        command overridden to `manage.py migrate`, before CodeDeploy shifts any traffic.
+      ServiceRole: !GetAtt MigrateProjectRole.Arn
+      TimeoutInMinutes: 15
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Sub |
+          version: 0.2
+          phases:
+            install:
+              commands:
+                - yum install -y jq
+            build:
+              commands:
+                - echo "Registering task definition revision from taskdef.json for the migration run"
+                - TASK_DEF_ARN=$(aws ecs register-task-definition --cli-input-json file://taskdef.json --query "taskDefinition.taskDefinitionArn" --output text)
+                - CONTAINER_NAME=$(jq -r '.containerDefinitions[0].name' taskdef.json)
+                - echo "Running migrate as a one-off task on $TASK_DEF_ARN"
+                - >
+                  TASK_ARN=$(aws ecs run-task
+                  --cluster "${ClusterName}"
+                  --task-definition "$TASK_DEF_ARN"
+                  --launch-type FARGATE
+                  --network-configuration "awsvpcConfiguration={subnets=[${PrivateEcsSubnetIds}],securityGroups=[${EcsSecurityGroupId}],assignPublicIp=DISABLED}"
+                  --overrides "{\"containerOverrides\":[{\"name\":\"$CONTAINER_NAME\",\"command\":[\"python\",\"manage.py\",\"migrate\",\"--noinput\"]}]}"
+                  --query "tasks[0].taskArn" --output text)
+                - echo "Waiting for migration task $TASK_ARN to stop"
+                - aws ecs wait tasks-stopped --cluster "${ClusterName}" --tasks "$TASK_ARN"
+                - EXIT_CODE=$(aws ecs describe-tasks --cluster "${ClusterName}" --tasks "$TASK_ARN" --query "tasks[0].containers[0].exitCode" --output text)
+                - echo "Migration task exit code -> $EXIT_CODE"
+                - test "$EXIT_CODE" = "0"
+      Tags: [{ Key: Project, Value: !Ref EnvironmentName }]
 
   CodeDeployServiceRole:
     Type: AWS::IAM::Role
@@ -168,6 +266,18 @@ Resources:
                 PollForSourceChanges: false
               OutputArtifacts:
                 - Name: DeployArtifact
+        - Name: Migrate
+          Actions:
+            - Name: RunDjangoMigrations
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: "1"
+              InputArtifacts:
+                - Name: DeployArtifact
+              Configuration:
+                ProjectName: !Ref MigrateProject
         - Name: Deploy
           Actions:
             - Name: ECSBlueGreenDeploy
@@ -227,6 +337,8 @@ Outputs:
     Value: !GetAtt ArtifactBucket.Arn
   PipelineName:
     Value: !Ref Pipeline
+  MigrateProjectName:
+    Value: !Ref MigrateProject
   CodeDeployApplicationName:
     Value: !Ref CodeDeployApplication
   CodeDeployDeploymentGroupName:

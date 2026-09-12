@@ -134,6 +134,16 @@ EventBridge → CodePipeline → CodeDeploy blue/green path.
   `taskdef.json`. One fewer place a deploy can silently go stale.
 - Full HA: RDS Multi-AZ standby + Redis replica. No AUTH token / TLS on Redis (private-subnet +
   security-group isolation only) — a documented lab-scope simplification.
+- **Migrations run in a dedicated pipeline stage, not the container's entrypoint.**
+  `pipeline.yaml`'s `Migrate` stage (a CodeBuild action, between Source and Deploy) registers the
+  incoming `taskdef.json` and runs it once as a standalone `ecs run-task` with the container
+  command overridden to `manage.py migrate --noinput`, in the same private subnets/security group
+  the real service uses. If that task's exit code isn't 0, the CodeBuild action fails and
+  CodeDeploy's blue/green shift never runs — migrations always complete exactly once, before any
+  traffic moves. Running `migrate` from the container's own entrypoint instead (the original,
+  simpler approach) races: every task a blue/green deploy — or autoscaling right after one —
+  starts calls `migrate` on startup concurrently, with nothing to guarantee only one wins on the
+  same schema change.
 - **ECR lives in its own repo (`todo-bootstrap`), not nested under root.yaml.** It has no
   VPC/network dependency and a completely independent lifecycle from the rest of the
   infrastructure — a bad `ecs.yaml` change rolling back the root stack should never be able to
@@ -188,6 +198,9 @@ aws cloudformation list-stack-resources --stack-name todo-dev-root  # see the ne
 aws cloudformation describe-stacks --stack-name todo-dev-ecr --query "Stacks[0].Outputs"  # separate stack, separate repo
 aws ecs describe-services --cluster todo-dev-cluster --services todo-dev-todo-app
 aws ssm get-parameters-by-path --path /todo-dev --output table  # confirm plain config landed
+aws codepipeline get-pipeline-state --name todo-dev-todo-app-pipeline  # Source/Migrate/Deploy status
+aws codebuild batch-get-builds --ids $(aws codebuild list-builds-for-project \
+  --project-name todo-dev-migrate --query "ids[0]" --output text)  # last migrate task's logs/exit
 ```
 
 Known nested-stack blast-radius tradeoff: because everything but `bootstrap` lives under one
