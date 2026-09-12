@@ -137,21 +137,21 @@ region_id = nid("region")
 
 boot = group_spec("Bootstrap  (bootstrap.yaml — one-time manual deploy)", "mxgraph.aws4.group_generic", "#545B64",
                    pad_top=45, pad_right=25, pad_bottom=25, pad_left=25, gap=30)
-g_icon(boot, "GitHub OIDC Identity Provider\ntoken.actions.githubusercontent.com", "identity_and_access_management_iam_role", SECURITY)
-g_icon(boot, "InfraDeployRole\ntodo-dev-infra-deploy-role\ntrust: repo=todo-infra", "identity_and_access_management_iam_role", SECURITY)
-g_icon(boot, "AppBuildRole\ntodo-dev-app-build-role\ntrust: repo=todo-app", "identity_and_access_management_iam_role", SECURITY)
-g_icon(boot, "EcrDeployRole\ntodo-dev-ecr-deploy-role\ntrust: repo=todo-bootstrap", "identity_and_access_management_iam_role", SECURITY)
-g_icon(boot, "Template Bucket (S3)\ncfn-templates staging\nfor `cfn package`", "simple_storage_service_bucket", STORAGE)
+g_icon(boot, "GitHub OIDC Identity Provider\ntoken.actions.githubusercontent.com", "identity_and_access_management", SECURITY)
+g_icon(boot, "InfraDeployRole\ntodo-dev-infra-deploy-role\ntrust: repo=todo-infra", "role", SECURITY)
+g_icon(boot, "AppBuildRole\ntodo-dev-app-build-role\ntrust: repo=todo-app", "role", SECURITY)
+g_icon(boot, "EcrDeployRole\ntodo-dev-ecr-deploy-role\ntrust: repo=todo-bootstrap", "role", SECURITY)
+g_icon(boot, "Template Bucket (S3)\ncfn-templates staging\nfor `cfn package`", "bucket", STORAGE)
 
 ecr_g = group_spec("ECR Repository  (own stack, in todo-bootstrap repo)", "mxgraph.aws4.group_generic", COMPUTE,
                     pad_top=45, pad_right=25, pad_bottom=25, pad_left=25, gap=30)
-ecr_icon_id = g_icon(ecr_g, "todo-app\nImageTagMutability: MUTABLE\nScanOnPush: true", "elastic_container_registry", COMPUTE)
+ecr_icon_id = g_icon(ecr_g, "todo-app\nImageTagMutability: MUTABLE\nScanOnPush: true", "ecr", COMPUTE)
 g_note(ecr_g, "Lifecycle policy: expire, keep\nlast 5 images (imageCountMoreThan)", h=70)
 
 pipe = group_spec("CI/CD Pipeline  (pipeline.yaml)", "mxgraph.aws4.group_generic", INTEGRATION,
                    pad_top=45, pad_right=25, pad_bottom=25, pad_left=25, gap=30)
 eb_icon_id = g_icon(pipe, "EventBridge Rule\nsource=aws.ecr, action=PUSH\nrepository-name=todo-app", "eventbridge", INTEGRATION)
-artifactbucket_id = g_icon(pipe, "Artifact Bucket (S3)\ndeploy-artifacts/artifacts.zip\nversioned, private", "simple_storage_service_bucket", STORAGE)
+artifactbucket_id = g_icon(pipe, "Artifact Bucket (S3)\ndeploy-artifacts/artifacts.zip\nversioned, private", "bucket", STORAGE)
 cp_icon_id = g_icon(pipe, "CodePipeline\nSource: S3 (taskdef.json +\nappspec.yaml delivered together)", "codepipeline", DEVTOOLS)
 cd_icon_id = g_icon(pipe, "CodeDeploy\nApp + DeploymentGroup\nBLUE_GREEN, ECSAllAtOnce", "codedeploy", DEVTOOLS)
 
@@ -275,10 +275,19 @@ internet_id = nid("internet")
 add_cell(users_id, icon_style("users", GENERAL), 60, 60 + cloud_h / 2 - 130, ICON_W, ICON_H, root_id, "Users")
 add_cell(internet_id, icon_style("internet_alt1", NETWORK), 60, 60 + cloud_h / 2 - 10, ICON_W, ICON_H, root_id, "Internet")
 
-EDGE = "edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;endArrow=block;elbow=vertical;strokeWidth=1.5;"
+# Standard AWS reference-architecture connector: solid, neutral gray, orthogonal, block arrow.
+# Matches the style used in AWS's own reference-architecture diagrams and drawio's AWS4 samples.
+EDGE = "edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;fontColor=#545B64;endArrow=block;elbow=vertical;strokeWidth=1.5;strokeColor=#545B64;"
+# Dashed variant of the same neutral gray for control-plane/permission relationships (IAM/secrets
+# reads, VPC endpoint access) and async replication — dash pattern signals "not the primary data
+# path," not a different subsystem, so it stays the same color as every other connector.
+EDGE_DASHED = EDGE + "dashed=1;"
 
 def edge(src, tgt, label="", style_extra=""):
     add_cell(nid("edge"), EDGE + style_extra, 0, 0, 0, 0, root_id, label, vertex=0, edge=1, source=src, target=tgt)
+
+def edge_dashed(src, tgt, label=""):
+    add_cell(nid("edge"), EDGE_DASHED, 0, 0, 0, 0, root_id, label, vertex=0, edge=1, source=src, target=tgt)
 
 edge(users_id, internet_id)
 edge(internet_id, alb_id)
@@ -288,26 +297,26 @@ edge(alb_id, az_b_ids["ecs"], ":8080")
 edge(az_a_ids["ecs"], az_a_ids["data"], "writes :5432")
 edge(az_b_ids["ecs"], az_a_ids["data"], "writes :5432")
 edge(az_a_ids["data"], az_a_ids["rds"])
-edge(az_a_ids["rds"], az_b_ids["rds"], "sync replication", "dashed=1;strokeColor=#3B48CC;")
+edge_dashed(az_a_ids["rds"], az_b_ids["rds"], "sync replication")
 
 edge(az_a_ids["ecs"], az_a_ids["cache"], "reads :6379")
 edge(az_b_ids["ecs"], az_a_ids["cache"], "reads :6379")
-edge(az_a_ids["cache"], az_b_ids["cache"], "replication", "dashed=1;strokeColor=#3B48CC;")
+edge_dashed(az_a_ids["cache"], az_b_ids["cache"], "replication")
 
-edge(az_a_ids["ecs"], az_a_ids["vpce"], "", "dashed=1;strokeColor=#8C4FFF;")
-edge(az_b_ids["ecs"], az_b_ids["vpce"], "", "dashed=1;strokeColor=#8C4FFF;")
+edge_dashed(az_a_ids["ecs"], az_a_ids["vpce"])
+edge_dashed(az_b_ids["ecs"], az_b_ids["vpce"])
 
-edge(dbsecret_id, az_a_ids["data"], "secrets:GetSecretValue", "dashed=1;strokeColor=#DD344C;")
-edge(dbsecret_id, az_a_ids["ecs"], "", "dashed=1;strokeColor=#DD344C;")
-edge(djsecret_id, az_a_ids["ecs"], "", "dashed=1;strokeColor=#DD344C;")
-edge(ssm_id, az_a_ids["ecs"], "ssm:GetParameters", "dashed=1;strokeColor=#DD344C;")
-edge(ssm_id, az_b_ids["ecs"], "", "dashed=1;strokeColor=#DD344C;")
+edge_dashed(dbsecret_id, az_a_ids["data"], "secrets:GetSecretValue")
+edge_dashed(dbsecret_id, az_a_ids["ecs"])
+edge_dashed(djsecret_id, az_a_ids["ecs"])
+edge_dashed(ssm_id, az_a_ids["ecs"], "ssm:GetParameters")
+edge_dashed(ssm_id, az_b_ids["ecs"])
 
 edge(ecr_icon_id, eb_icon_id, "image PUSH event")
 edge(eb_icon_id, cp_icon_id, "StartPipelineExecution")
 edge(artifactbucket_id, cp_icon_id, "S3 source\n(taskdef.json + appspec.yaml)")
 edge(cp_icon_id, cd_icon_id)
-edge(cd_icon_id, alb_id, "blue/green traffic shift", "strokeColor=#B20000;strokeWidth=2;")
+edge(cd_icon_id, alb_id, "blue/green traffic shift", f"strokeColor={COMPUTE};strokeWidth=2;")
 
 mxfile = ET.Element("mxfile", host="app.diagrams.net")
 diagram = ET.SubElement(mxfile, "diagram", id="todo-app-arch", name="Network Architecture")
