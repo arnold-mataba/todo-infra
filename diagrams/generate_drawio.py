@@ -269,8 +269,13 @@ internet_id = nid("internet")
 # Positioned near the top, roughly level with the Internet Gateway — keeps the Users -> Internet
 # -> IGW chain in a clear horizontal band above everything else, instead of cutting across the
 # middle of the diagram through Platform Services / the AZ boxes to reach the IGW up top.
-add_cell(users_id, icon_style("users", GENERAL), 60, 22, ICON_W, ICON_H, root_id, "Users")
-add_cell(internet_id, icon_style("internet_alt1", NETWORK), 60, 162, ICON_W, ICON_H, root_id, "Internet")
+# Both sit well above the Platform Services / VPC boxes (which start at y=190, the same height
+# used before — that was the bug: this row's center landed exactly on that boundary, so the
+# Internet -> IGW line skimmed along the top edge of both boxes for its entire length instead of
+# clearing them). y=62 puts this row's center at 90 — 30px above Region's own top edge (120), and
+# well clear of Platform Services/VPC (190).
+add_cell(users_id, icon_style("users", GENERAL), 60, 6, ICON_W, ICON_H, root_id, "Users")
+add_cell(internet_id, icon_style("internet_alt1", NETWORK), 60, 72, ICON_W, ICON_H, root_id, "Internet")
 
 # Internet Gateway: a single VPC-attached resource, drawn straddling the VPC's top boundary
 # (half in, half out) — the standard AWS reference-architecture placement, since it's the one
@@ -302,7 +307,12 @@ edge(users_id, internet_id, "", "exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;
 # Internet arrives at the IGW's left face; the two branches down to the ALB nodes leave from the
 # IGW's bottom face, split left/right so all three lines visibly diverge at the icon instead of
 # reading as one line passing straight through it.
-edge(internet_id, igw_id, "", "exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;")
+# Travels at y=100 the whole way (well above Region's top edge at 120, let alone Platform
+# Services/VPC at 190) before dropping straight down into the IGW's top face — never skims along
+# any container's top edge, only crosses down into the one boundary IGW deliberately straddles.
+igw_center_x = vpc_abs_x + vpc_w / 2
+edge(internet_id, igw_id, "", "exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;",
+     points=[(igw_center_x, 100)])
 edge(igw_id, az_a_ids["alb"], "", "exitX=0.25;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;")
 edge(igw_id, az_b_ids["alb"], "", "exitX=0.75;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;")
 edge(az_a_ids["alb"], az_a_ids["ecs"], ":8080", "exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;")
