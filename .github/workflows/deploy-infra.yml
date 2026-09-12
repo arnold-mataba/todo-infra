@@ -35,27 +35,11 @@ jobs:
 
       - name: Determine InitialImageUri
         id: latest-image
-        run: |
-          EXISTING=$(aws cloudformation describe-stacks \
-            --stack-name ${{ vars.ENVIRONMENT_NAME }}-root \
-            --query "Stacks[0].Parameters[?ParameterKey=='InitialImageUri'].ParameterValue | [0]" \
-            --output text 2>/dev/null || true)
-          if [ -n "$EXISTING" ] && [ "$EXISTING" != "None" ] && [ "$EXISTING" != "" ]; then
-            echo "EcsStack already exists — reusing its current InitialImageUri ($EXISTING) instead of recomputing it, since CodeDeploy owns the task definition from here on."
-            echo "image_uri=$EXISTING" >> "$GITHUB_OUTPUT"
-          else
-            ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-            TAG=$(aws ecr describe-images \
-              --repository-name ${{ vars.ECR_REPOSITORY_NAME }} \
-              --query 'sort_by(imageDetails,&imagePushedAt)[-1].imageTags[0]' \
-              --output text 2>/dev/null || true)
-            if [ -z "$TAG" ] || [ "$TAG" = "None" ]; then
-              echo "No image pushed yet — deploying foundation only (network/data/cache)."
-              echo "image_uri=" >> "$GITHUB_OUTPUT"
-            else
-              echo "image_uri=${ACCOUNT_ID}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/${{ vars.ECR_REPOSITORY_NAME }}:${TAG}" >> "$GITHUB_OUTPUT"
-            fi
-          fi
+        env:
+          ENVIRONMENT_NAME: ${{ vars.ENVIRONMENT_NAME }}
+          ECR_REPOSITORY_NAME: ${{ vars.ECR_REPOSITORY_NAME }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: ./scripts/determine-image-uri.sh
 
       - name: Deploy root.yaml (network, data, cache, and ecs+pipeline once an image exists)
         run: |

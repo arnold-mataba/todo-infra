@@ -32,8 +32,11 @@ detail is added. Rerun it after any architecture change:
 cd diagrams && python3 generate_drawio.py
 ```
 
-`diagrams/architecture.png`/`architecture.py` are an earlier, simpler rendering (Python
-`diagrams` library) kept as a secondary reference; the `.drawio` file is the primary deliverable.
+An earlier, simpler rendering (`architecture.py`, Python `diagrams` library, plus its stale
+`architecture.png` export) used to be kept alongside this as a "secondary reference" — removed:
+it predated most of the icons above (OIDC, all three IAM roles, ECR, both S3 buckets) and having
+two diagrams meant one of them was always out of date. `architecture.drawio` is the only
+diagram now; regenerate it with the command above, there is nothing else to keep in sync.
 
 ## Stack architecture: real nested stacks, not sibling stacks
 
@@ -150,6 +153,11 @@ EventBridge → CodePipeline → CodeDeploy blue/green path.
   touch the image repository holding every previously-built image. Its own dedicated OIDC role
   (`EcrDeployRole`, created in that repo's `bootstrap.yaml` alongside the other two) keeps its
   permissions scoped to exactly that one stack and that one repository.
+- **Branchy logic lives in `scripts/`, not inline in workflow YAML.** `deploy-infra.yml`'s
+  `InitialImageUri` resolution (reuse the existing value once `EcsStack` exists, otherwise look
+  up the newest ECR tag) used to be an if/else block embedded directly in a `run:` step. It's now
+  `scripts/determine-image-uri.sh`, a plain, testable shell script the workflow just calls —
+  keeping the workflow file itself to short, single-purpose steps.
 
 ## One-time bootstrap (do this before the workflow can run at all)
 
