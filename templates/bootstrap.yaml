@@ -1,11 +1,11 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  One-time bootstrap: GitHub OIDC provider + IAM roles (infra-deploy, app-build), and the S3
-  bucket `aws cloudformation package` uploads root.yaml's nested child templates to. Must be
-  deployed once manually (local/console credentials) before any GitHub Actions workflow can
-  run — see README "One-time bootstrap" section. Everything else (network/ecr/data/cache/ecs/
-  pipeline) is deployed as real nested stacks under templates/root.yaml, which this role then
-  packages and deploys on every push.
+  One-time bootstrap: GitHub OIDC provider + IAM roles (infra-deploy, app-build, ecr-deploy),
+  and the S3 bucket `aws cloudformation package` uploads root.yaml's nested child templates to.
+  Must be deployed once manually (local/console credentials) before any GitHub Actions workflow
+  can run — see README "One-time bootstrap" section. network/data/cache/ecs/pipeline are
+  deployed as real nested stacks under todo-infra's templates/root.yaml (via InfraDeployRole);
+  ECR is deployed as its own standalone stack in the separate todo-ecr repo (via EcrDeployRole).
 
 Parameters:
   EnvironmentName:
@@ -31,13 +31,19 @@ Parameters:
       Numeric GitHub repository ID for todo-app. Obtain with:
       gh api repos/<owner>/todo-app --jq .id
 
+  EcrRepositoryId:
+    Type: String
+    Description: >
+      Numeric GitHub repository ID for todo-ecr. Obtain with:
+      gh api repos/<owner>/todo-ecr --jq .id
+
   ECRRepositoryName:
     Type: String
     Default: todo-app
     Description: >
       Fixed name used to construct the ECR repo ARN here and to actually create the repo in
-      root.yaml's ecr child stack. Deterministic naming avoids a cross-stack dependency cycle
-      at bootstrap time.
+      the separate todo-ecr repo's stack. Deterministic naming avoids a cross-stack/cross-repo
+      dependency cycle at bootstrap time.
 
   ArtifactBucketName:
     Type: String
@@ -210,11 +216,70 @@ Resources:
                   - !Sub "arn:aws:s3:::${ArtifactBucketName}"
                   - !Sub "arn:aws:s3:::${ArtifactBucketName}/*"
 
+  EcrDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${EnvironmentName}-ecr-deploy-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GitHubOIDCProvider
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:repository_id: !Ref EcrRepositoryId
+                token.actions.githubusercontent.com:repository_owner_id: !Ref GitHubOwnerId
+      Policies:
+        - PolicyName: deploy-ecr-stack
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: CloudFormationOnEcrStack
+                Effect: Allow
+                Action:
+                  - cloudformation:CreateStack
+                  - cloudformation:UpdateStack
+                  - cloudformation:DeleteStack
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStackResource
+                  - cloudformation:DescribeStackResources
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:GetTemplate
+                  - cloudformation:ListStackResources
+                  - cloudformation:ValidateTemplate
+                Resource:
+                  - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${EnvironmentName}-ecr*/*"
+              - Sid: ManageEcrRepository
+                Effect: Allow
+                Action:
+                  - ecr:CreateRepository
+                  - ecr:DeleteRepository
+                  - ecr:DescribeRepositories
+                  - ecr:PutLifecyclePolicy
+                  - ecr:GetLifecyclePolicy
+                  - ecr:DeleteLifecyclePolicy
+                  - ecr:PutImageScanningConfiguration
+                  - ecr:PutImageTagMutability
+                  - ecr:TagResource
+                  - ecr:UntagResource
+                  - ecr:ListTagsForResource
+                Resource:
+                  - !Sub "arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${ECRRepositoryName}"
+
 Outputs:
   InfraDeployRoleArn:
     Value: !GetAtt InfraDeployRole.Arn
   AppBuildRoleArn:
     Value: !GetAtt AppBuildRole.Arn
+  EcrDeployRoleArn:
+    Value: !GetAtt EcrDeployRole.Arn
   TemplateBucketName:
     Value: !Ref TemplateBucketName
   ECRRepositoryName:

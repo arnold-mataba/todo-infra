@@ -3,7 +3,8 @@
 CloudFormation infrastructure for the To-Do app: multi-AZ VPC, RDS PostgreSQL (Multi-AZ) behind
 RDS Proxy, ElastiCache Redis (replication group with automatic failover), ECS Fargate + ALB, and
 the CodePipeline/CodeDeploy blue/green deployment pipeline triggered by EventBridge on ECR image
-push.
+push. The ECR repository itself lives in a separate repo — see `todo-ecr` — deployed and
+versioned independently of everything here.
 
 ## Network architecture diagram
 
@@ -13,9 +14,9 @@ nesting convention (AWS Cloud -> Region -> VPC -> Availability Zone -> Subnet) u
 AWS4 icon shapes built into draw.io, not a rendered image or an AI-interpreted text prompt.
 
 Region-level (outside the VPC — these are regional services, not VPC-resident) is laid out as a
-2x2 grid of clearly separated groups: **Bootstrap** (OIDC provider, both IAM roles, template
-bucket), **ECR Repository** (its own nested stack, shown standalone rather than lumped into the
-pipeline group), **CI/CD Pipeline** (EventBridge rule, artifact bucket, CodePipeline, CodeDeploy),
+2x2 grid of clearly separated groups: **Bootstrap** (OIDC provider, all three IAM roles, template
+bucket), **ECR Repository** (its own repo and stack — `todo-ecr` — shown standalone rather than
+lumped into the pipeline group), **CI/CD Pipeline** (EventBridge rule, artifact bucket, CodePipeline, CodeDeploy),
 and **Configuration & Secrets** (both Secrets Manager secrets, all 5 SSM parameters). Each
 Availability Zone is its own 2x2 grid of subnets (Public/ECS on top, Data/Cache below) — every
 resource label carries real detail (instance class, IAM role names, security group names, ports,
@@ -34,13 +35,15 @@ cd diagrams && python3 generate_drawio.py
 
 ## Stack architecture: real nested stacks, not sibling stacks
 
-`templates/root.yaml` is the root template. It nests `network.yaml`, `ecr.yaml`, `data.yaml`,
-`cache.yaml`, `ecs.yaml`, and `pipeline.yaml` as actual `AWS::CloudFormation::Stack` children —
-each one is created and updated as part of the root stack's own deploy, and receives its inputs
-as CloudFormation Parameters passed down from the root (sourced via `Fn::GetAtt` on an earlier
-sibling's `Outputs`), not via `Fn::ImportValue`/`Export`. `templates/bootstrap.yaml` is the one
-exception: it is deployed separately and first, because nothing can package or deploy the root
-stack before the IAM role and S3 template-staging bucket it creates exist.
+`templates/root.yaml` is the root template. It nests `network.yaml`, `data.yaml`, `cache.yaml`,
+`ecs.yaml`, and `pipeline.yaml` as actual `AWS::CloudFormation::Stack` children — each one is
+created and updated as part of the root stack's own deploy, and receives its inputs as
+CloudFormation Parameters passed down from the root (sourced via `Fn::GetAtt` on an earlier
+sibling's `Outputs`), not via `Fn::ImportValue`/`Export`. Two things are deliberately *not*
+nested here: `templates/bootstrap.yaml` (deployed separately, first, because nothing can package
+or deploy the root stack before the IAM role and S3 template-staging bucket it creates exist),
+and ECR itself, which lives in the separate `todo-ecr` repo/stack — root.yaml only ever
+references it by *name* (`ECRRepositoryName`), never creates it or nests it.
 
 Because the child templates are local files, deploying the root stack is a two-step process:
 
@@ -54,25 +57,23 @@ aws cloudformation package \
 aws cloudformation deploy \
   --stack-name todo-dev-root \
   --template-file packaged-root.yaml \
-  --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
+  --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides EnvironmentName=todo-dev ECRRepositoryName=todo-app ArtifactBucketName=<...>
 ```
 
 `package` uploads each local child template to S3 and rewrites root.yaml's relative
 `TemplateURL: ./network.yaml`-style references into real S3 URLs; `deploy` then creates/updates
-the root stack and, transitively, every nested child. `CAPABILITY_AUTO_EXPAND` is required
-because `ecr.yaml` uses the `AWS::LanguageExtensions` transform (for `Fn::ToJsonString` — see
-below); CloudFormation requires that capability at the top-level deploy call whenever any
-template in the nested tree uses a transform, not just on the template that declares it.
+the root stack and, transitively, every nested child.
 
 ## No placeholder image, ever — EcsStack/PipelineStack are conditional
 
 `root.yaml` takes an `InitialImageUri` parameter (default `""`) and a `HasInitialImage`
 condition. `EcsStack` and `PipelineStack` only exist when that condition is true. So:
 
-1. **First deploy**: leave `InitialImageUri` empty. Only `NetworkStack`/`EcrStack`/`DataStack`/
+1. **First deploy**: leave `InitialImageUri` empty. Only `NetworkStack`/`DataStack`/
    `CacheStack` get created — no ECS, no ALB, no pipeline, and critically, no fake placeholder
-   image anywhere.
+   image anywhere. (The ECR repository itself needs to exist first too — see `todo-ecr`'s
+   README; its deploy is fully independent of this one.)
 2. **One-time manual bootstrap push** (see below): build and push the *real* app image once,
    by hand, so ECR actually has a tag to reference.
 3. **Redeploy `root.yaml`** with `InitialImageUri` set to that real image URI. This creates
@@ -130,6 +131,12 @@ EventBridge → CodePipeline → CodeDeploy blue/green path.
   `taskdef.json`. One fewer place a deploy can silently go stale.
 - Full HA: RDS Multi-AZ standby + Redis replica. No AUTH token / TLS on Redis (private-subnet +
   security-group isolation only) — a documented lab-scope simplification.
+- **ECR lives in its own repo (`todo-ecr`), not nested under root.yaml.** It has no VPC/network
+  dependency and a completely independent lifecycle from the rest of the infrastructure — a
+  bad `ecs.yaml` change rolling back the root stack should never be able to touch the image
+  repository holding every previously-built image. Its own dedicated OIDC role (`EcrDeployRole`,
+  created here in `bootstrap.yaml` alongside the other two) keeps its permissions scoped to
+  exactly that one stack and that one repository.
 
 ## One-time bootstrap (do this before the workflow can run at all)
 
@@ -147,33 +154,37 @@ aws cloudformation deploy \
     GitHubOwnerId=<gh api users/<owner> --jq .id> \
     InfraRepositoryId=<gh api repos/<owner>/todo-infra --jq .id> \
     AppRepositoryId=<gh api repos/<owner>/todo-app --jq .id> \
+    EcrRepositoryId=<gh api repos/<owner>/todo-ecr --jq .id> \
     ECRRepositoryName=todo-app \
     ArtifactBucketName=todo-app-pipeline-artifacts-<your-account-id> \
     TemplateBucketName=todo-app-cfn-templates-<your-account-id>
 ```
 
 `GitHubOwnerId`/`*RepositoryId` are numeric IDs, not names — they're stable across org/repo
-renames, unlike a `sub` claim built from the "owner/repo" string.
+renames, unlike a `sub` claim built from the "owner/repo" string. This one bootstrap stack
+creates the OIDC roles for all three repos (`todo-infra`, `todo-app`, `todo-ecr`) — extending a
+shared bootstrap rather than duplicating one per repo.
 
 ## Required GitHub repo configuration (`todo-infra`)
 
 **Secrets** (masked — ARNs/account IDs/repo IDs/bucket names, per best-practice: identifiers stay
 in Secrets, never Variables):
 `INFRA_DEPLOY_ROLE_ARN`, `GITHUB_OWNER_ID`, `INFRA_REPOSITORY_ID`, `APP_REPOSITORY_ID`,
-`ARTIFACT_BUCKET_NAME`, `TEMPLATE_BUCKET_NAME`
+`ECR_REPOSITORY_ID`, `ARTIFACT_BUCKET_NAME`, `TEMPLATE_BUCKET_NAME`
 
 **Variables** (plain, non-identifying config — also referenced as `vars.*`, never hardcoded as a
 literal in the workflow): `ENVIRONMENT_NAME` (`todo-dev`), `AWS_REGION` (e.g. `us-east-1`),
 `ECR_REPOSITORY_NAME` (`todo-app`)
 
-## After the root stack deploys: hand outputs to `todo-app`
+## After deploying: hand outputs to `todo-app`
 
-The `todo-app` repo has no access to these CFN outputs — collect the two real secret ARNs once
-and set them there (see `todo-app/README.md` — the list is short, since non-secret config is now
-resolved by naming convention / SSM instead of being copied through GitHub):
+The `todo-app` repo has no access to these CFN outputs — collect them once and set them there
+(see `todo-app/README.md` — the list is short, since non-secret config is now resolved by naming
+convention / SSM instead of being copied through GitHub). Two different stacks now hold these:
 
 ```bash
 aws cloudformation describe-stacks --stack-name todo-dev-root --query "Stacks[0].Outputs"
+aws cloudformation describe-stacks --stack-name todo-dev-ecr --query "Stacks[0].Outputs"  # RepositoryUri
 ```
 
 ## Verifying a deploy
@@ -182,6 +193,7 @@ aws cloudformation describe-stacks --stack-name todo-dev-root --query "Stacks[0]
 aws cloudformation describe-stacks --stack-name todo-dev-root \
   --query "Stacks[0].Outputs[?OutputKey=='AlbDnsName'].OutputValue" --output text
 aws cloudformation list-stack-resources --stack-name todo-dev-root  # see the nested child stacks
+aws cloudformation describe-stacks --stack-name todo-dev-ecr --query "Stacks[0].Outputs"  # separate stack, separate repo
 aws ecs describe-services --cluster todo-dev-cluster --services todo-dev-todo-app
 aws ssm get-parameters-by-path --path /todo-dev --output table  # confirm plain config landed
 ```

@@ -1,9 +1,11 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  Root stack for the To-Do app. Nests network/ecr/data/cache/ecs/pipeline as real
+  Root stack for the To-Do app. Nests network/data/cache/ecs/pipeline as real
   AWS::CloudFormation::Stack children, wired via Fn::GetAtt on sibling Outputs, not Export/
   Fn::ImportValue. Deploy with `aws cloudformation package` then `deploy` — see README.
-  bootstrap.yaml (OIDC roles + template bucket) deploys separately, first.
+  bootstrap.yaml (OIDC roles + template bucket) deploys separately, first. ECR lives in its
+  own repo (todo-ecr) and its own standalone stack — not nested here at all — so this root
+  stack only ever references the ECR repository by name (ECRRepositoryName), never creates it.
 
   EcsStack/PipelineStack only get created once InitialImageUri is set to a real pushed image
   (HasInitialImage condition) — leave it empty on the first deploy (foundation only, no
@@ -85,15 +87,6 @@ Resources:
         ContainerPort: !Ref ContainerPort
       Tags: [{ Key: Project, Value: !Ref EnvironmentName }]
 
-  EcrStack:
-    Type: AWS::CloudFormation::Stack
-    Properties:
-      TemplateURL: ./ecr.yaml
-      Parameters:
-        EnvironmentName: !Ref EnvironmentName
-        ECRRepositoryName: !Ref ECRRepositoryName
-      Tags: [{ Key: Project, Value: !Ref EnvironmentName }]
-
   DataStack:
     Type: AWS::CloudFormation::Stack
     Properties:
@@ -164,8 +157,6 @@ Resources:
 Outputs:
   AlbDnsName:
     Value: !If [HasInitialImage, !GetAtt EcsStack.Outputs.AlbDnsName, "not created yet - see InitialImageUri"]
-  EcrRepositoryUri:
-    Value: !GetAtt EcrStack.Outputs.RepositoryUri
   ClusterName:
     Value: !If [HasInitialImage, !GetAtt EcsStack.Outputs.ClusterName, "not created yet - see InitialImageUri"]
   ServiceName:
