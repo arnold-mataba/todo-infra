@@ -173,9 +173,7 @@ left_col_id = nid("leftcol")
 
 def build_az(is_a):
     letter = "A" if is_a else "B"
-    alb_id = nid(f"alb{letter}")
-    pub_icons = [(alb_id, f"ALB node (AZ {letter})\none logical Application Load\nBalancer, an ENI in each AZ\nListener :80 -> TG blue/green", "application_load_balancer", NETWORK)]
-    pub = subnet_spec(f"Public Subnet {letter}  (10.0.{0 if is_a else 1}.0/24)", "public", pub_icons)
+    pub = subnet_spec(f"Public Subnet {letter}  (10.0.{0 if is_a else 1}.0/24)", "public", [])
 
     ecs_task_id = nid(f"ecs{letter}")
     vpce_id = nid(f"vpce{letter}")
@@ -219,24 +217,32 @@ def build_az(is_a):
     finalize_subnet(data, ar2x + r2pos[0][0], ar2y + r2pos[0][1], az_id)
     finalize_subnet(cache, ar2x + r2pos[1][0], ar2y + r2pos[1][1], az_id)
 
-    ids = {"alb": alb_id, "ecs": ecs_task_id, "vpce": vpce_id, "data": proxy_id or rds_id, "rds": rds_id, "cache": redis_id}
+    ids = {"ecs": ecs_task_id, "vpce": vpce_id, "data": proxy_id or rds_id, "rds": rds_id, "cache": redis_id}
     return az_id, aw, ah, ids
 
 az_a_id, az_a_w, az_a_h, az_a_ids = build_az(True)
 az_b_id, az_b_w, az_b_h, az_b_ids = build_az(False)
 (az_row_w, az_row_h), az_row_pos = hgrid([(az_a_w, az_a_h), (az_b_w, az_b_h)], gap=90)
 
-vpc_inner = Stack("v", None, pad_top=55, pad_right=45, pad_bottom=45, pad_left=45, gap=55)
+vpc_inner = Stack("v", None, pad_top=55, pad_right=45, pad_bottom=45, pad_left=45, gap=45)
 nx, ny = vpc_inner.place(500, ICON_H + SLOT_LABEL_H)
+ax, ay = vpc_inner.place(az_row_w, ICON_H + SLOT_LABEL_H)
 rx, ry = vpc_inner.place(az_row_w, az_row_h)
 vpc_w, vpc_h = vpc_inner.size()
 vpc_id = nid("vpc")
 
 add_cell(nid("svcnote"), NOTE_STYLE, nx, ny, 500, ICON_H + SLOT_LABEL_H, vpc_id,
-         "Health check: /health/ — Application Load Balancer's single listener (:80) forwards to "
-         "whichever target group (blue/green) is currently live, across both AZs' registered targets.\n"
          "ECS Service: todo-dev-todo-app — Auto Scaling: min 1 / desired 1 / max 4, target tracking "
          "60% avg CPU — DeploymentController: CODE_DEPLOY — Task size: 0.5 vCPU / 1 GB (Fargate)")
+
+# One ALB, centered above both AZs — it's a single resource with a load-balancer node (ENI) in
+# each AZ's public subnet, not two separate load balancers. Placed here (not inside either
+# public subnet) so one icon can connect cleanly down into both AZs without implying it's
+# specific to one of them.
+alb_id = nid("alb")
+alb_x = ax + (az_row_w - ICON_W) / 2
+add_cell(alb_id, icon_style("application_load_balancer", NETWORK), alb_x, ay, ICON_W, ICON_H, vpc_id,
+         "Application Load Balancer\n(one resource, a node in each AZ)\nListener :80 -> TG blue/green\nHealth check: /health/")
 
 add_cell(az_a_id, group_style("mxgraph.aws4.group_availability_zone", "#147EBA", dashed=1),
          rx + az_row_pos[0][0], ry + az_row_pos[0][1], az_a_w, az_a_h, vpc_id, "Availability Zone A")
@@ -286,10 +292,9 @@ def edge_dashed(src, tgt, label=""):
     add_cell(nid("edge"), EDGE_DASHED, 0, 0, 0, 0, root_id, label, vertex=0, edge=1, source=src, target=tgt)
 
 edge(users_id, internet_id)
-edge(internet_id, az_a_ids["alb"])
-edge(internet_id, az_b_ids["alb"])
-edge(az_a_ids["alb"], az_a_ids["ecs"], ":8080")
-edge(az_b_ids["alb"], az_b_ids["ecs"], ":8080")
+edge(internet_id, alb_id)
+edge(alb_id, az_a_ids["ecs"], ":8080", "exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;")
+edge(alb_id, az_b_ids["ecs"], ":8080", "exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;")
 
 edge(az_a_ids["ecs"], az_a_ids["data"], "writes :5432")
 edge(az_b_ids["ecs"], az_a_ids["data"], "writes :5432")
@@ -313,8 +318,7 @@ edge(ecr_icon_id, eb_icon_id, "image PUSH event")
 edge(eb_icon_id, cp_icon_id, "StartPipelineExecution")
 edge(artifactbucket_id, cp_icon_id, "S3 source\n(taskdef.json + appspec.yaml)")
 edge(cp_icon_id, cd_icon_id)
-edge(cd_icon_id, az_a_ids["alb"], "blue/green traffic shift\n(shared listener, both AZs)", f"strokeColor={COMPUTE};strokeWidth=2;")
-edge(cd_icon_id, az_b_ids["alb"], "", f"strokeColor={COMPUTE};strokeWidth=2;")
+edge(cd_icon_id, alb_id, "blue/green traffic shift", f"strokeColor={COMPUTE};strokeWidth=2;")
 
 mxfile = ET.Element("mxfile", host="app.diagrams.net")
 diagram = ET.SubElement(mxfile, "diagram", id="todo-app-arch", name="Network Architecture")
