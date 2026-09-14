@@ -354,6 +354,8 @@ Resources:
             - SUCCESS
           repository-name:
             - !Ref EcrRepositoryName
+          image-tag:
+            - latest
       Targets:
         - Id: StartTodoAppPipeline
           Arn: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${Pipeline}"
