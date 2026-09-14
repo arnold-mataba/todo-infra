@@ -50,7 +50,7 @@ Parameters:
     Type: String
   DbSecretArn:
     Type: String
-    Description: Real secret (RDS-managed, unpredictable name) — genuinely needs cross-stack wiring.
+    Description: Self-managed secret (data.yaml's DbCredentialsSecret) — deterministic name, but the ARN still has a random suffix, so it genuinely needs cross-stack wiring.
 
 Resources:
   Cluster:
